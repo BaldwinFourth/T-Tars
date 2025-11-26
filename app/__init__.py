@@ -1,2 +1,3 @@
-"""T-TARS Trading Bot v2.0 - Cloud Storage Integration"""
-__version__ = "2.0.0"
+"""T-TARS Trading Bot"""
+from .config import Config
+__version__ = Config.VERSION

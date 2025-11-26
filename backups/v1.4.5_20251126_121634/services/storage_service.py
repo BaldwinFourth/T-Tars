@@ -120,31 +120,13 @@ class StorageService:
     def _clean_markdown(self, text):
         """
         Clean text for Telegram Markdown compatibility
-        Remove ALL problematic characters
+        Remove problematic characters: ```, _, *, [, ]
         """
-        # Remove all markdown formatting
+        # Remove triple backticks
         text = text.replace('```', '')
+        # Remove markdown bold/italic
         text = text.replace('**', '')
         text = text.replace('__', '')
+        # Remove code ticks
         text = text.replace('`', '')
-        text = text.replace('_', ' ')  # Underscore sorun yaratır
-        text = text.replace('*', '')
-        text = text.replace('[', '')
-        text = text.replace(']', '')
-        text = text.replace('(', '')
-        text = text.replace(')', '')
-        text = text.replace('~', '')
-        text = text.replace('>', '')
-        text = text.replace('#', '')
-        text = text.replace('+', '')
-        text = text.replace('-', '')
-        text = text.replace('=', '')
-        text = text.replace('|', '')
-        text = text.replace('{', '')
-        text = text.replace('}', '')
-        text = text.replace('.', ' ')
-        text = text.replace('/', ' ')
-        # Multiple spaces to single
-        while '  ' in text:
-            text = text.replace('  ', ' ')
         return text.strip()

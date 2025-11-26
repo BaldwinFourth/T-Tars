@@ -1,0 +1,550 @@
+import ccxt
+from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
+
+class OKXService:
+    """OKX Exchange Service - Market Data + Smart Money Detection"""
+    
+    # Türkçe → OKX timeframe mapping
+    TIMEFRAME_MAP = {
+        '1G': '1d',   # 1 Gün
+        '4S': '4h',   # 4 Saat
+        '1S': '1h',   # 1 Saat
+        '30D': '30m', # 30 Dakika
+        '15D': '15m', # 15 Dakika
+        '5D': '5m',   # 5 Dakika
+        '3D': '3m',   # 3 Dakika (Futures only)
+        '2D': '2m',   # 2 Dakika (Futures only - test gerekli)
+        '1D': '1m'    # 1 Dakika
+    }
+    
+    def __init__(self):
+        self.exchange = ccxt.okx({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'swap'}  # Perpetual Futures (USDT-M)
+        })
+        logger.info("OKX Service initialized (Perpetual Futures)")
+
+    
+    @staticmethod
+    def convert_timeframe(turkish_tf):
+        """
+        Türkçe timeframe'i OKX formatına çevir
+        
+        Args:
+            turkish_tf: Türkçe format (ör: '1G', '4S', '15D')
+            
+        Returns:
+            str: OKX format (ör: '1d', '4h', '15m')
+        """
+        return OKXService.TIMEFRAME_MAP.get(turkish_tf, '1d')
+    
+    def get_current_price(self, ticker="BTC/USDT"):
+        """Mevcut fiyat"""
+        try:
+            ticker_data = self.exchange.fetch_ticker(ticker)
+            price = ticker_data['last']
+            logger.info(f"Current price {ticker}: {price}")
+            return price
+        except Exception as e:
+            logger.error(f"OKX get_price error: {e}")
+            raise
+    
+    def get_ohlcv(self, ticker="BTC/USDT", timeframe='1G', limit=100):
+        """
+        OHLCV data çek - Türkçe timeframe destekli
+        
+        Returns:
+            list: [[timestamp, open, high, low, close, volume], ...]
+        """
+        try:
+            okx_timeframe = self.convert_timeframe(timeframe) if timeframe in self.TIMEFRAME_MAP else timeframe
+            ohlcv = self.exchange.fetch_ohlcv(ticker, okx_timeframe, limit=limit)
+            logger.info(f"OHLCV {ticker} {timeframe}: {len(ohlcv)} candles")
+            return ohlcv
+        except Exception as e:
+            logger.error(f"OKX get_ohlcv error: {e}")
+            raise
+    
+    def get_previous_day_candle(self, ticker="BTC/USDT"):
+        """Önceki günün mumu (PDC)"""
+        try:
+            ohlcv = self.exchange.fetch_ohlcv(ticker, '1d', limit=3)
+            prev_candle = ohlcv[-2]
+            
+            result = {
+                'timestamp': prev_candle[0],
+                'open': prev_candle[1],
+                'high': prev_candle[2],
+                'low': prev_candle[3],
+                'close': prev_candle[4],
+                'volume': prev_candle[5],
+                'date': datetime.fromtimestamp(prev_candle[0]/1000).strftime('%Y-%m-%d'),
+                'candle_type': 'green' if prev_candle[4] > prev_candle[1] else 'red'
+            }
+            
+            logger.info(f"PDC {ticker}: {result['candle_type']} O:{result['open']} H:{result['high']} L:{result['low']} C:{result['close']}")
+            return result
+        except Exception as e:
+            logger.error(f"OKX previous_day error: {e}")
+            raise
+    
+    def calculate_atr(self, ticker="BTC/USDT", timeframe='1d', period=14):
+        """ATR(14) hesapla"""
+        try:
+            ohlcv = self.get_ohlcv(ticker, timeframe, limit=period+1)
+            
+            tr_list = []
+            for i in range(1, len(ohlcv)):
+                high = ohlcv[i][2]
+                low = ohlcv[i][3]
+                prev_close = ohlcv[i-1][4]
+                
+                tr = max(
+                    high - low,
+                    abs(high - prev_close),
+                    abs(low - prev_close)
+                )
+                tr_list.append(tr)
+            
+            atr = sum(tr_list[-period:]) / period
+            logger.info(f"ATR({period}) {ticker} {timeframe}: {atr:.2f}")
+            return round(atr, 2)
+        except Exception as e:
+            logger.error(f"OKX ATR error: {e}")
+            raise
+    
+    def calculate_fibonacci(self, ticker="BTC/USDT", use_pdc=True):
+        """
+        Fibonacci seviyeleri - PDC'ye göre
+        Kırmızı mum: 0%=High, 100%=Low (ters)
+        Yeşil mum: 0%=Low, 100%=High (normal)
+        """
+        try:
+            if use_pdc:
+                prev_candle = self.get_previous_day_candle(ticker)
+                high = prev_candle['high']
+                low = prev_candle['low']
+                candle_type = prev_candle['candle_type']
+            else:
+                ohlcv = self.get_ohlcv(ticker, '1d', limit=1)
+                high = ohlcv[-1][2]
+                low = ohlcv[-1][3]
+                candle_type = 'green' if ohlcv[-1][4] > ohlcv[-1][1] else 'red'
+            
+            diff = high - low
+            
+            # Kırmızı mum: Ters fibo
+            if candle_type == 'red':
+                levels = {
+                    '0.0': high,      # Ters
+                    '23.6': high - (diff * 0.236),
+                    '38.2': high - (diff * 0.382),
+                    '50.0': high - (diff * 0.500),
+                    '61.8': high - (diff * 0.618),
+                    '70.5': high - (diff * 0.705),
+                    '78.6': high - (diff * 0.786),
+                    '100.0': low      # Ters
+                }
+            else:  # Yeşil mum: Normal fibo
+                levels = {
+                    '0.0': low,
+                    '23.6': low + (diff * 0.236),
+                    '38.2': low + (diff * 0.382),
+                    '50.0': low + (diff * 0.500),
+                    '61.8': low + (diff * 0.618),
+                    '70.5': low + (diff * 0.705),
+                    '78.6': low + (diff * 0.786),
+                    '100.0': high
+                }
+            
+            # Extension levels (fiyat PDC range dışındaysa)
+            levels['1.272'] = high + (diff * 0.272) if candle_type == 'green' else low - (diff * 0.272)
+            levels['1.618'] = high + (diff * 0.618) if candle_type == 'green' else low - (diff * 0.618)
+            
+            result = {
+                'high': high,
+                'low': low,
+                'candle_type': candle_type,
+                'levels': {k: round(v, 2) for k, v in levels.items()}
+            }
+            
+            logger.info(f"Fibonacci {ticker} ({candle_type}): {low:.2f} - {high:.2f}")
+            return result
+        except Exception as e:
+            logger.error(f"OKX Fibonacci error: {e}")
+            raise
+    
+    def analyze_volume(self, ohlcv, lookback=20):
+        """
+        Volume analizi - Detaylı
+        
+        Returns:
+            dict: {
+                'current': float,
+                'average': float,
+                'spike': bool,
+                'spike_ratio': float,
+                'trend': 'increasing' | 'decreasing' | 'neutral',
+                'strength': 'high' | 'medium' | 'low'
+            }
+        """
+        try:
+            volumes = [x[5] for x in ohlcv[-lookback:]]
+            current_volume = volumes[-1]
+            avg_volume = sum(volumes[:-1]) / (lookback - 1)
+            
+            # Volume spike (2x üstü)
+            spike_ratio = current_volume / avg_volume
+            is_spike = spike_ratio >= 2.0
+            
+            # Volume trend (son 5 vs önceki 5)
+            recent_avg = sum(volumes[-5:]) / 5
+            previous_avg = sum(volumes[-10:-5]) / 5
+            
+            if recent_avg > previous_avg * 1.2:
+                trend = 'increasing'
+            elif recent_avg < previous_avg * 0.8:
+                trend = 'decreasing'
+            else:
+                trend = 'neutral'
+            
+            # Volume strength
+            if current_volume > avg_volume * 1.5:
+                strength = 'high'
+            elif current_volume > avg_volume * 0.8:
+                strength = 'medium'
+            else:
+                strength = 'low'
+            
+            result = {
+                'current': round(current_volume, 2),
+                'average': round(avg_volume, 2),
+                'spike': is_spike,
+                'spike_ratio': round(spike_ratio, 2),
+                'trend': trend,
+                'strength': strength
+            }
+            
+            logger.info(f"Volume analysis: {strength} ({spike_ratio:.2f}x, {trend})")
+            return result
+        except Exception as e:
+            logger.error(f"Volume analysis error: {e}")
+            raise
+    
+    def detect_order_blocks(self, ticker="BTC/USDT", timeframe='4h', lookback=50):
+        """
+        Order Block detection + VOLUME validation
+        
+        Returns:
+            list: [{
+                'type': 'bullish' | 'bearish',
+                'price': float,
+                'index': int,
+                'volume_confirmed': bool,
+                'strength': 'high' | 'medium' | 'low'
+            }]
+        """
+        try:
+            ohlcv = self.get_ohlcv(ticker, timeframe, limit=lookback)
+            order_blocks = []
+            
+            for i in range(2, len(ohlcv) - 1):
+                candle = ohlcv[i]
+                prev_candle = ohlcv[i-1]
+                next_candle = ohlcv[i+1]
+                
+                # Bullish OB: Down candle → Up break
+                if (candle[4] < candle[1] and  # Red candle
+                    next_candle[4] > candle[2]):  # Next breaks high
+                    
+                    # Volume check
+                    volume_analysis = self.analyze_volume(ohlcv[:i+2], lookback=20)
+                    volume_confirmed = volume_analysis['strength'] in ['high', 'medium']
+                    
+                    order_blocks.append({
+                        'type': 'bullish',
+                        'price': candle[2],  # High
+                        'low': candle[3],
+                        'index': i,
+                        'volume_confirmed': volume_confirmed,
+                        'volume_strength': volume_analysis['strength'],
+                        'strength': 'high' if volume_confirmed else 'low'
+                    })
+                
+                # Bearish OB: Up candle → Down break
+                elif (candle[4] > candle[1] and  # Green candle
+                      next_candle[4] < candle[3]):  # Next breaks low
+                    
+                    volume_analysis = self.analyze_volume(ohlcv[:i+2], lookback=20)
+                    volume_confirmed = volume_analysis['strength'] in ['high', 'medium']
+                    
+                    order_blocks.append({
+                        'type': 'bearish',
+                        'price': candle[3],  # Low
+                        'high': candle[2],
+                        'index': i,
+                        'volume_confirmed': volume_confirmed,
+                        'volume_strength': volume_analysis['strength'],
+                        'strength': 'high' if volume_confirmed else 'low'
+                    })
+            
+            # Son 5 OB döndür
+            recent_obs = order_blocks[-5:] if len(order_blocks) > 5 else order_blocks
+            logger.info(f"Order Blocks {ticker} {timeframe}: {len(recent_obs)} found")
+            return recent_obs
+        except Exception as e:
+            logger.error(f"OB detection error: {e}")
+            return []
+    
+    def detect_fair_value_gaps(self, ticker="BTC/USDT", timeframe='1h', lookback=50):
+        """
+        Fair Value Gap detection + VOLUME validation
+        
+        Returns:
+            list: [{
+                'type': 'bullish' | 'bearish',
+                'gap_high': float,
+                'gap_low': float,
+                'volume_confirmed': bool
+            }]
+        """
+        try:
+            ohlcv = self.get_ohlcv(ticker, timeframe, limit=lookback)
+            fvgs = []
+            
+            for i in range(1, len(ohlcv) - 1):
+                candle_before = ohlcv[i-1]
+                candle = ohlcv[i]
+                candle_after = ohlcv[i+1]
+                
+                # Bullish FVG: Gap between before's high and after's low
+                if candle_after[3] > candle_before[2]:  # After low > Before high
+                    volume_analysis = self.analyze_volume(ohlcv[:i+2], lookback=20)
+                    
+                    fvgs.append({
+                        'type': 'bullish',
+                        'gap_high': candle_after[3],
+                        'gap_low': candle_before[2],
+                        'gap_size': candle_after[3] - candle_before[2],
+                        'index': i,
+                        'volume_confirmed': volume_analysis['spike'],
+                        'volume_strength': volume_analysis['strength']
+                    })
+                
+                # Bearish FVG: Gap between before's low and after's high
+                elif candle_after[2] < candle_before[3]:  # After high < Before low
+                    volume_analysis = self.analyze_volume(ohlcv[:i+2], lookback=20)
+                    
+                    fvgs.append({
+                        'type': 'bearish',
+                        'gap_high': candle_before[3],
+                        'gap_low': candle_after[2],
+                        'gap_size': candle_before[3] - candle_after[2],
+                        'index': i,
+                        'volume_confirmed': volume_analysis['spike'],
+                        'volume_strength': volume_analysis['strength']
+                    })
+            
+            recent_fvgs = fvgs[-5:] if len(fvgs) > 5 else fvgs
+            logger.info(f"FVG {ticker} {timeframe}: {len(recent_fvgs)} found")
+            return recent_fvgs
+        except Exception as e:
+            logger.error(f"FVG detection error: {e}")
+            return []
+    
+    def detect_liquidity_sweep(self, ticker="BTC/USDT", timeframe='1h', lookback=50):
+        """
+        Liquidity Sweep detection + VOLUME spike check
+        
+        Returns:
+            dict: {
+                'detected': bool,
+                'type': 'high' | 'low' | None,
+                'swept_level': float,
+                'volume_spike': bool
+            }
+        """
+        try:
+            ohlcv = self.get_ohlcv(ticker, timeframe, limit=lookback)
+            
+            # Son 20 mumda high/low seviyeleri
+            highs = [x[2] for x in ohlcv[-20:]]
+            lows = [x[3] for x in ohlcv[-20:]]
+            
+            recent_high = max(highs[:-1])
+            recent_low = min(lows[:-1])
+            
+            last_candle = ohlcv[-1]
+            
+            # Volume check
+            volume_analysis = self.analyze_volume(ohlcv, lookback=20)
+            
+            # High sweep: Wick yukarı sweep sonra down
+            if last_candle[2] > recent_high and last_candle[4] < recent_high:
+                return {
+                    'detected': True,
+                    'type': 'high',
+                    'swept_level': recent_high,
+                    'current_price': last_candle[4],
+                    'volume_spike': volume_analysis['spike'],
+                    'volume_strength': volume_analysis['strength']
+                }
+            
+            # Low sweep: Wick aşağı sweep sonra up
+            elif last_candle[3] < recent_low and last_candle[4] > recent_low:
+                return {
+                    'detected': True,
+                    'type': 'low',
+                    'swept_level': recent_low,
+                    'current_price': last_candle[4],
+                    'volume_spike': volume_analysis['spike'],
+                    'volume_strength': volume_analysis['strength']
+                }
+            
+            return {
+                'detected': False,
+                'type': None,
+                'volume_spike': False
+            }
+        except Exception as e:
+            logger.error(f"Liquidity sweep error: {e}")
+            return {'detected': False, 'type': None}
+    
+    def calculate_stop_loss(self, ticker="BTC/USDT", fixed_amount=1000):
+        """Stop Loss - Sabit $1000 pay"""
+        try:
+            current_price = self.get_current_price(ticker)
+            stop_price = current_price - fixed_amount
+            
+            return {
+                'current_price': round(current_price, 2),
+                'stop_price': round(stop_price, 2),
+                'distance': fixed_amount
+            }
+        except Exception as e:
+            logger.error(f"Stop Loss error: {e}")
+            raise
+    
+    def get_complete_analysis_data(self, ticker="BTC/USDT"):
+        """
+        KOMPLE ANALİZ DATA - Multi-timeframe + Volume + Smart Money
+        """
+        try:
+            # Current data
+            current_price = self.get_current_price(ticker)
+            prev_candle = self.get_previous_day_candle(ticker)
+            
+            # ATR - Multi timeframe
+            atr_1d = self.calculate_atr(ticker, '1d', 14)
+            atr_4h = self.calculate_atr(ticker, '4h', 14)
+            atr_1h = self.calculate_atr(ticker, '1h', 14)
+            atr_15m = self.calculate_atr(ticker, '15m', 14)
+            atr_3m = self.calculate_atr(ticker, '3m', 14)
+            
+            # 2m optional (may not be available)
+            try:
+                atr_2m = self.calculate_atr(ticker, '2m', 14)
+            except Exception as e:
+                logger.warning(f"2m ATR not available: {e}")
+                atr_2m = None
+            
+            # Fibonacci
+            fibo = self.calculate_fibonacci(ticker, use_pdc=True)
+            
+            # Stop
+            stop = self.calculate_stop_loss(ticker, 1000)
+            
+            # Multi-timeframe OHLCV + Volume
+            ohlcv_1d = self.get_ohlcv(ticker, '1d', limit=30)
+            ohlcv_4h = self.get_ohlcv(ticker, '4h', limit=48)
+            ohlcv_1h = self.get_ohlcv(ticker, '1h', limit=24)
+            ohlcv_15m = self.get_ohlcv(ticker, '15m', limit=24)
+            ohlcv_3m = self.get_ohlcv(ticker, '3m', limit=30)
+            
+            # 2m optional
+            try:
+                ohlcv_2m = self.get_ohlcv(ticker, '2m', limit=30)
+            except Exception as e:
+                logger.warning(f"2m OHLCV not available: {e}")
+                ohlcv_2m = None
+            
+            # Volume analysis per timeframe
+            volume_1d = self.analyze_volume(ohlcv_1d, lookback=20)
+            volume_4h = self.analyze_volume(ohlcv_4h, lookback=20)
+            volume_1h = self.analyze_volume(ohlcv_1h, lookback=20)
+            volume_15m = self.analyze_volume(ohlcv_15m, lookback=20)
+            volume_3m = self.analyze_volume(ohlcv_3m, lookback=20)
+            
+            # 2m volume optional
+            if ohlcv_2m:
+                volume_2m = self.analyze_volume(ohlcv_2m, lookback=20)
+            else:
+                volume_2m = None
+            
+            # Smart Money Detection
+            obs_4h = self.detect_order_blocks(ticker, '4h', lookback=50)
+            obs_1h = self.detect_order_blocks(ticker, '1h', lookback=50)
+            obs_15m = self.detect_order_blocks(ticker, '15m', lookback=50)
+            obs_3m = self.detect_order_blocks(ticker, '3m', lookback=50)
+            
+            fvgs_4h = self.detect_fair_value_gaps(ticker, '4h', lookback=50)
+            fvgs_1h = self.detect_fair_value_gaps(ticker, '1h', lookback=50)
+            fvgs_15m = self.detect_fair_value_gaps(ticker, '15m', lookback=50)
+            fvgs_3m = self.detect_fair_value_gaps(ticker, '3m', lookback=50)
+            
+            sweep_1h = self.detect_liquidity_sweep(ticker, '1h', lookback=50)
+            
+            result = {
+                'ticker': ticker,
+                'current_date': datetime.now().strftime('%Y-%m-%d'),
+                'current_time': datetime.now().strftime('%H:%M:%S'),
+                'current_price': current_price,
+                
+                'previous_day': prev_candle,
+                
+                'atr': {
+                    '1d': atr_1d,
+                    '4h': atr_4h,
+                    '1h': atr_1h,
+                    '15m': atr_15m,
+                    '3m': atr_3m,
+                    '2m': atr_2m if atr_2m else 'N/A'
+                },
+                
+                'fibonacci': fibo,
+                'stop_loss': stop,
+                
+                'volume': {
+                    '1d': volume_1d,
+                    '4h': volume_4h,
+                    '1h': volume_1h,
+                    '15m': volume_15m,
+                    '3m': volume_3m,
+                    '2m': volume_2m if volume_2m else 'N/A'
+                },
+                
+                'smart_money': {
+                    'order_blocks': {
+                        '4h': obs_4h,
+                        '1h': obs_1h,
+                        '15m': obs_15m,
+                        '3m': obs_3m
+                    },
+                    'fair_value_gaps': {
+                        '4h': fvgs_4h,
+                        '1h': fvgs_1h,
+                        '15m': fvgs_15m,
+                        '3m': fvgs_3m
+                    },
+                    'liquidity_sweep': sweep_1h
+                }
+            }
+            
+            logger.info(f"Complete analysis data prepared for {ticker}")
+            return result
+        except Exception as e:
+            logger.error(f"Complete analysis error: {e}")
+            raise

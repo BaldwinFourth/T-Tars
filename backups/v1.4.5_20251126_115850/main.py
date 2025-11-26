@@ -734,10 +734,16 @@ def handle_help_command(chat_id):
         if version_features:
             features_text = "\n".join(version_features)
         else:
-            features_text = f"📄 Detaylar için: CHANGELOG v{Config.VERSION}"
+            features_text = """✅ Balance hesabı düzeltmesi
+✅ Win rate fix (TP1 ≠ WIN)
+✅ Time tracking (duration)
+✅ Movement tracking ($)
+✅ Emoji sistem (TP1/TP2/STOP)"""
     except Exception as e:
         logger.warning(f"⚠️ Could not load changelog features: {e}")
-        features_text = f"📄 Detaylar için: CHANGELOG v{Config.VERSION}"
+        features_text = """✅ Balance & Win Rate Fix
+✅ Time & Movement Tracking
+✅ Enhanced Emojis"""
     
     help_text = f"""
 🤖 *T-TARS Trading Bot v{Config.VERSION}*

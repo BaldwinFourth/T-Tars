@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
 from app.services.claude_service import ClaudeService
 from app.services.telegram_service import TelegramService
@@ -5,6 +6,7 @@ from app.services.storage_service import StorageService
 from app.services.okx_service import OKXService
 from app.services.tracking_service import TrackingService
 from app.config import Config
+from app.strategies.calculators import calculate_setup_strength, MIN_RR_RATIO  # v1.4.4
 from datetime import datetime, timezone, timedelta
 import logging
 import sys
@@ -808,38 +810,11 @@ def test_telegram():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio, confidence):
-    """Setup gücünü hesapla (0-1 arası)"""
-    if volume_spike_ratio >= 3.0:
-        volume_score = 1.0
-    elif volume_spike_ratio >= 2.5:
-        volume_score = 0.8
-    elif volume_spike_ratio >= 2.0:
-        volume_score = 0.6
-    elif volume_spike_ratio >= 1.5:
-        volume_score = 0.4
-    else:
-        volume_score = 0.2
-    
-    strength_map = {'high': 1.0, 'medium': 0.6, 'low': 0.3}
-    strength_score = strength_map.get(ob_or_fvg_strength.lower(), 0.5)
-    
-    if rr_ratio >= 3.0:
-        rr_score = 1.0
-    elif rr_ratio >= 2.5:
-        rr_score = 0.8
-    elif rr_ratio >= 2.2:
-        rr_score = 0.6
-    elif rr_ratio >= 2.0:
-        rr_score = 0.4
-    else:
-        rr_score = 0.2
-    
-    confidence_map = {'HIGH': 1.0, 'MEDIUM': 0.6, 'LOW': 0.3}
-    confidence_score = confidence_map.get(confidence, 0.5)
-    
-    overall_strength = (volume_score + strength_score + rr_score + confidence_score) / 4
-    return overall_strength
+
+# ============================================
+# SETUP DETECTION FUNCTIONS
+# ============================================
+# calculate_setup_strength artık app.strategies.calculators'dan import ediliyor (v1.4.4)
 
 def detect_trading_setup(pair, market_data):
     """Trading setup tespit et + Entry/Stop/TP hesapla (v1.4.3: timeframe return eklendi)"""
@@ -897,8 +872,8 @@ def detect_trading_setup(pair, market_data):
                 # Debug log
                 logger.info(f"📊 LONG R:R: entry=${current_price:.2f}, stop=${stop_price:.2f}, tp1=${tp1_price:.2f}, tp2=${tp2_price:.2f}, risk=${risk:.2f}, reward=${reward:.2f}, ratio={rr_ratio:.2f}")
                 
-                if rr_ratio < 2.0:
-                    logger.info(f"LONG setup rejected: R:R {rr_ratio:.1f} < 2.0")
+                if rr_ratio < MIN_RR_RATIO:  # v1.4.4: Use constant
+                    logger.info(f"LONG setup rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
                     return False
                 
                 balance = Config.DEFAULT_BALANCE
@@ -981,8 +956,8 @@ def detect_trading_setup(pair, market_data):
                 # Debug log
                 logger.info(f"📊 SHORT R:R: entry=${current_price:.2f}, stop=${stop_price:.2f}, tp1=${tp1_price:.2f}, tp2=${tp2_price:.2f}, risk=${risk:.2f}, reward=${reward:.2f}, ratio={rr_ratio:.2f}")
                 
-                if rr_ratio < 2.0:
-                    logger.info(f"SHORT setup rejected: R:R {rr_ratio:.1f} < 2.0")
+                if rr_ratio < MIN_RR_RATIO:  # v1.4.4: Use constant
+                    logger.info(f"SHORT setup rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
                     return False
                 
                 balance = Config.DEFAULT_BALANCE
@@ -1057,8 +1032,8 @@ def detect_trading_setup(pair, market_data):
                 reward = abs(tp - current_price)
                 rr_ratio = reward / risk if risk > 0 else 0
                 
-                if rr_ratio < 2.0:
-                    logger.info(f"FVG LONG setup rejected: R:R {rr_ratio:.1f} < 2.0")
+                if rr_ratio < MIN_RR_RATIO:  # v1.4.4: Use constant
+                    logger.info(f"FVG LONG setup rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
                     return False
                 
                 balance = Config.DEFAULT_BALANCE
@@ -1111,8 +1086,8 @@ def detect_trading_setup(pair, market_data):
                 reward = abs(current_price - tp)
                 rr_ratio = reward / risk if risk > 0 else 0
                 
-                if rr_ratio < 2.0:
-                    logger.info(f"FVG SHORT setup rejected: R:R {rr_ratio:.1f} < 2.0")
+                if rr_ratio < MIN_RR_RATIO:  # v1.4.4: Use constant
+                    logger.info(f"FVG SHORT setup rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
                     return False
                 
                 balance = Config.DEFAULT_BALANCE
@@ -1217,7 +1192,7 @@ def check_timeframe_for_setups(pair, market_data, timeframe, bias, current_price
                 
                 logger.info(f"📊 {pair} {timeframe.upper()} LONG OB R:R: {rr_ratio:.2f}")
                 
-                if rr_ratio >= 2.0:
+                if rr_ratio >= MIN_RR_RATIO:  # v1.4.4: Use constant
                     balance = Config.DEFAULT_BALANCE
                     setup_strength = calculate_setup_strength(
                         volume_spike_ratio=volume['spike_ratio'],
@@ -1293,7 +1268,7 @@ def check_timeframe_for_setups(pair, market_data, timeframe, bias, current_price
                 
                 logger.info(f"📊 {pair} {timeframe.upper()} SHORT OB R:R: {rr_ratio:.2f}")
                 
-                if rr_ratio >= 2.0:
+                if rr_ratio >= MIN_RR_RATIO:  # v1.4.4: Use constant
                     balance = Config.DEFAULT_BALANCE
                     setup_strength = calculate_setup_strength(
                         volume_spike_ratio=volume['spike_ratio'],
@@ -1368,7 +1343,7 @@ def check_timeframe_for_setups(pair, market_data, timeframe, bias, current_price
                 
                 logger.info(f"📊 {pair} {timeframe.upper()} LONG FVG R:R: {rr_ratio:.2f}")
                 
-                if rr_ratio >= 2.0:
+                if rr_ratio >= MIN_RR_RATIO:  # v1.4.4: Use constant
                     setups.append({
                         'type': f'FVG + Volume Spike (LONG)',
                         'confidence': 'MEDIUM',
@@ -1394,7 +1369,7 @@ def check_timeframe_for_setups(pair, market_data, timeframe, bias, current_price
                 
                 logger.info(f"📊 {pair} {timeframe.upper()} SHORT FVG R:R: {rr_ratio:.2f}")
                 
-                if rr_ratio >= 2.0:
+                if rr_ratio >= MIN_RR_RATIO:  # v1.4.4: Use constant
                     setups.append({
                         'type': f'FVG + Volume Spike (SHORT)',
                         'confidence': 'MEDIUM',

@@ -1,0 +1,178 @@
+# -*- coding: utf-8 -*-
+"""
+T-TARS OB Detector v1.4.9
+=========================
+Order Block setup detection (LONG + SHORT)
+"""
+
+import logging
+from app.config import Config
+from app.strategies.calculators import (
+    calculate_setup_strength,
+    MIN_RR_RATIO,
+    STOP_MULTIPLIER,
+    TP1_MULTIPLIER,
+    TP2_MULTIPLIER
+)
+
+logger = logging.getLogger(__name__)
+
+
+def detect_ob_long(ob, volume, atr, timeframe, current_price):
+    """
+    Bullish Order Block setup tespiti
+    
+    Returns:
+        dict: Setup bilgileri veya None
+    """
+    try:
+        entry_zone = f"${ob['low']:,.2f} - ${ob['price']:,.2f}"
+        entry_price = (ob['low'] + ob['price']) / 2  # OB mid-point
+        
+        stop_distance = atr * STOP_MULTIPLIER
+        stop_price = ob['low'] - stop_distance
+        stop_loss = f"${stop_price:,.2f}"
+        
+        tp1_price = entry_price + (atr * TP1_MULTIPLIER)
+        tp2_price = entry_price + (atr * TP2_MULTIPLIER)
+        tp1 = f"${tp1_price:,.2f}"
+        tp2 = f"${tp2_price:,.2f}"
+        
+        risk = abs(entry_price - stop_price)
+        reward = abs(tp1_price - entry_price)
+        rr_ratio = reward / risk if risk > 0 else 0
+        
+        logger.info(f"📊 OB LONG R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        
+        if rr_ratio < MIN_RR_RATIO:
+            logger.info(f"OB LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
+            return None
+        
+        # Risk hesabı
+        balance = Config.DEFAULT_BALANCE
+        setup_strength = calculate_setup_strength(
+            volume_spike_ratio=volume['spike_ratio'],
+            ob_or_fvg_strength=ob['strength'],
+            rr_ratio=rr_ratio,
+            confidence='HIGH'
+        )
+        risk_percent = Config.RISK_PER_TRADE_MIN + (setup_strength * (Config.RISK_PER_TRADE_MAX - Config.RISK_PER_TRADE_MIN))
+        risk_usd = (balance * risk_percent) / 100
+        
+        detailed_explanation = f"""
+📊 **OB Analizi:**
+• Bullish OB @ ${ob['low']:,.2f} - ${ob['price']:,.2f}
+• Volume spike: {volume['spike_ratio']:.1f}x ({volume['strength'].upper()})
+• OB strength: {ob['strength'].upper()}
+• Timeframe: {timeframe.upper()}
+
+🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
+
+📈 **TP/Stop:**
+• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• R:R Ratio: 1:{rr_ratio:.1f}
+"""
+        
+        return {
+            'type': 'OB + Volume Spike (LONG)',
+            'confidence': 'HIGH',
+            'timeframe': timeframe,
+            'entry_zone': entry_zone,
+            'stop_loss': stop_loss,
+            'tp1': tp1,
+            'tp2': tp2,
+            'current_price': current_price,
+            'entry_price': entry_price,
+            'stop_price': stop_price,
+            'tp1_price': tp1_price,
+            'tp2_price': tp2_price,
+            'volume_spike_ratio': volume['spike_ratio'],
+            'ob_strength': ob['strength'],
+            'rr_ratio': rr_ratio,
+            'detailed_explanation': detailed_explanation,
+            'details': f"Bullish OB @ ${ob['low']:,.2f}\nVolume: {volume['spike_ratio']}x spike"
+        }
+        
+    except Exception as e:
+        logger.error(f"OB LONG detection error: {e}")
+        return None
+
+
+def detect_ob_short(ob, volume, atr, timeframe, current_price):
+    """
+    Bearish Order Block setup tespiti
+    
+    Returns:
+        dict: Setup bilgileri veya None
+    """
+    try:
+        entry_zone = f"${ob['price']:,.2f} - ${ob['high']:,.2f}"
+        entry_price = (ob['price'] + ob['high']) / 2  # OB mid-point
+        
+        stop_distance = atr * STOP_MULTIPLIER
+        stop_price = ob['high'] + stop_distance
+        stop_loss = f"${stop_price:,.2f}"
+        
+        tp1_price = entry_price - (atr * TP1_MULTIPLIER)
+        tp2_price = entry_price - (atr * TP2_MULTIPLIER)
+        tp1 = f"${tp1_price:,.2f}"
+        tp2 = f"${tp2_price:,.2f}"
+        
+        risk = abs(stop_price - entry_price)
+        reward = abs(entry_price - tp1_price)
+        rr_ratio = reward / risk if risk > 0 else 0
+        
+        logger.info(f"📊 OB SHORT R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        
+        if rr_ratio < MIN_RR_RATIO:
+            logger.info(f"OB SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
+            return None
+        
+        # Risk hesabı
+        balance = Config.DEFAULT_BALANCE
+        setup_strength = calculate_setup_strength(
+            volume_spike_ratio=volume['spike_ratio'],
+            ob_or_fvg_strength=ob['strength'],
+            rr_ratio=rr_ratio,
+            confidence='HIGH'
+        )
+        risk_percent = Config.RISK_PER_TRADE_MIN + (setup_strength * (Config.RISK_PER_TRADE_MAX - Config.RISK_PER_TRADE_MIN))
+        risk_usd = (balance * risk_percent) / 100
+        
+        detailed_explanation = f"""
+📊 **OB Analizi:**
+• Bearish OB @ ${ob['price']:,.2f} - ${ob['high']:,.2f}
+• Volume spike: {volume['spike_ratio']:.1f}x ({volume['strength'].upper()})
+• OB strength: {ob['strength'].upper()}
+• Timeframe: {timeframe.upper()}
+
+🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
+
+📉 **TP/Stop:**
+• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• R:R Ratio: 1:{rr_ratio:.1f}
+"""
+        
+        return {
+            'type': 'OB + Volume Spike (SHORT)',
+            'confidence': 'HIGH',
+            'timeframe': timeframe,
+            'entry_zone': entry_zone,
+            'stop_loss': stop_loss,
+            'tp1': tp1,
+            'tp2': tp2,
+            'current_price': current_price,
+            'entry_price': entry_price,
+            'stop_price': stop_price,
+            'tp1_price': tp1_price,
+            'tp2_price': tp2_price,
+            'volume_spike_ratio': volume['spike_ratio'],
+            'ob_strength': ob['strength'],
+            'rr_ratio': rr_ratio,
+            'detailed_explanation': detailed_explanation,
+            'details': f"Bearish OB @ ${ob['high']:,.2f}\nVolume: {volume['spike_ratio']}x spike"
+        }
+        
+    except Exception as e:
+        logger.error(f"OB SHORT detection error: {e}")
+        return None

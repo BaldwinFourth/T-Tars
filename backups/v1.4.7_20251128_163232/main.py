@@ -23,7 +23,6 @@ from app.handlers.telegram_handlers import (
     handle_status_command,
     handle_scan_command,
     handle_score_command,
-    handle_reset_score_command,
     handle_help_command
 )
 import logging
@@ -127,8 +126,6 @@ def telegram_webhook():
             handle_scan_command(chat_id)
         elif text.startswith('/score'):
             handle_score_command(chat_id)
-        elif text.startswith('/reset_score'):
-            handle_reset_score_command(chat_id)
         elif text.startswith('/help'):
             handle_help_command(chat_id)
         else:
@@ -244,32 +241,24 @@ def monitor_setups():
                     
                     stats = tracking.get_aggregate_stats()
                     
-                    # Timeframe from setup
-                    timeframe = setup_data.get('timeframe', setup.get('timeframe', 'N/A'))
-                    entry_price = setup_data.get('entry_price', setup.get('current_price', 0))
-                    
-                    # Emoji mapping (v1.4.8)
+                    # Emoji mapping
                     if new_status == 'TP1':
                         emoji = '🎯'
-                        header_emoji = '💰💰💰'
                         status_text = 'TP1 HIT!'
                         status_emoji = '✅'
                         next_action = '📊 Status: Breakeven, TP2 bekliyor'
                     elif new_status == 'COMPLETED':
                         emoji = '🎉'
-                        header_emoji = '🎉🎉🎉'
                         status_text = 'TP2 HIT - FULL WIN!'
                         status_emoji = '🏆'
                         next_action = '✅ Setup tamamlandı!'
                     elif new_status == 'STOPPED':
                         emoji = '⛔'
-                        header_emoji = '❌'
                         status_text = 'STOP HIT'
                         status_emoji = '❌'
                         next_action = '❌ Setup kapatıldı'
                     else:
                         emoji = '📊'
-                        header_emoji = ''
                         status_text = 'Status Updated'
                         status_emoji = 'ℹ️'
                         next_action = ''
@@ -277,16 +266,15 @@ def monitor_setups():
                     # Duration text
                     duration_text = f"⏱️ Duration: {duration:.1f} minutes\n" if duration > 0 else ""
                     
-                    # Movement text (v1.4.8: entry → target arası)
-                    movement_text = f"📊 Movement: ${movement:.2f}\n" if movement > 0 else ""
+                    # Movement text
+                    movement_text = f"📊 Movement: ${movement:.2f} captured\n" if movement > 0 else ""
                     
                     broadcast_message = f"""
-{emoji} **SETUP #{setup_id[:8].upper()} → {status_text}** {header_emoji}
+{emoji} **SETUP #{setup_id[:8].upper()} → {status_text}**
 
 📊 **Parite:** {pair}
 🎯 **Setup Type:** {setup_type}
-⏱️ **Timeframe:** {timeframe.upper() if isinstance(timeframe, str) else timeframe}
-{status_emoji} **Entry:** ${entry_price:,.2f} → **{new_status}:** ${current_price:,.2f}
+{status_emoji} **Entry:** ${setup['current_price']:,.2f} → **{new_status}:** ${current_price:,.2f}
 💰 **Profit:** {'+' if profit >= 0 else ''}{profit_percent:+.2f}% (${profit:+,.2f})
 {movement_text}{duration_text}{next_action}
 

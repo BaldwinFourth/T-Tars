@@ -661,6 +661,39 @@ def handle_score_command(chat_id):
         _telegram.send(f"❌ İstatistik hatası: {str(e)}", chat_id=chat_id)
 
 
+def handle_reset_score_command(chat_id):
+    """
+    /reset_score - Tüm istatistikleri sıfırla (GİZLİ KOMUT - /help'te görünmez)
+    """
+    try:
+        _telegram.send("🔄 İstatistikler sıfırlanıyor...", chat_id=chat_id)
+        
+        # Tracking service'de reset fonksiyonu çağır
+        result = _tracking.reset_all_tracking()
+        
+        if result:
+            reset_message = f"""
+✅ **İSTATİSTİKLER SIFIRLANDI**
+
+🗑️ Tüm setup'lar temizlendi
+💰 Balance: $1,000.00 (başlangıç)
+📊 Win Rate: 0%
+🎯 Total Setups: 0
+
+⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+
+_Yeni setup'lar /scan ile oluşturulabilir._
+"""
+            _telegram.send(reset_message, chat_id=chat_id)
+            logger.info(f"✅ Stats reset by chat_id: {chat_id}")
+        else:
+            _telegram.send("❌ Sıfırlama başarısız. Tekrar deneyin.", chat_id=chat_id)
+        
+    except Exception as e:
+        logger.error(f"❌ Reset score error: {e}")
+        _telegram.send(f"❌ Hata: {str(e)}", chat_id=chat_id)
+
+
 def handle_help_command(chat_id):
     """Yardım mesajı"""
     

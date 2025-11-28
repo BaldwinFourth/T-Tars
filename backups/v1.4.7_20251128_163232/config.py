@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 import os
 from pathlib import Path
 
 class Config:
-    """T-TARS Configuration v1.4.8"""
+    """T-TARS Configuration v1.4.2"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -14,7 +13,7 @@ class Config:
         with open(VERSION_FILE, 'r') as f:
             VERSION = f.read().strip()
     except FileNotFoundError:
-        VERSION = "1.4.8"  # Fallback
+        VERSION = "1.4.0"  # Fallback
     
     # API Keys
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
@@ -40,7 +39,7 @@ class Config:
     # Storage - Templates
     BUCKET_NAME = os.getenv('BUCKET_NAME', 'tars-trading-templates')
     
-    # Storage - Tracking Data
+    # Storage - Tracking Data (NEW v1.4.0)
     BUCKET_NAME_DATA = os.getenv('BUCKET_NAME_DATA', 'tars-trading-data')
     
     # Template filenames (in Cloud Storage bucket)
@@ -49,15 +48,10 @@ class Config:
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
     
     # TRADING PAIRS
-    # Auto-scan (3 dakikada bir) - v1.4.8: ETH, LTC, BNB, SHIB, DOGE eklendi
+    # Auto-scan (3 dakikada bir) - Bot yorulmasın
     AUTO_SCAN_PAIRS = [
         'BTC/USDT:USDT',
-        'ETH/USDT:USDT',
-        'SOL/USDT:USDT',
-        'LTC/USDT:USDT',
-        'BNB/USDT:USDT',
-        'SHIB/USDT:USDT',
-        'DOGE/USDT:USDT'
+        'SOL/USDT:USDT'
     ]
     
     # Manuel /plan için - Desteklenen tüm pariteler
@@ -93,7 +87,7 @@ class Config:
     RISK_PER_TRADE_MAX = float(os.getenv('RISK_PER_TRADE_MAX', '2.0'))  # %2
     DEFAULT_BALANCE = float(os.getenv('DEFAULT_BALANCE', '1000'))  # $1000 default
     
-    # Monitoring Settings
+    # Monitoring Settings (NEW v1.4.0)
     MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))  # Cloud Scheduler interval
     
     # Server

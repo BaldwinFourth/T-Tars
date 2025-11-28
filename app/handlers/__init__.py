@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Handlers v1.4.6
+T-TARS Handlers v1.4.8
 ======================
 Telegram bot command handlers.
 """
@@ -14,6 +14,7 @@ from .telegram_handlers import (
     handle_status_command,
     handle_scan_command,
     handle_score_command,
+    handle_reset_score_command,
     handle_help_command
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     'handle_status_command',
     'handle_scan_command',
     'handle_score_command',
+    'handle_reset_score_command',
     'handle_help_command'
 ]

@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.6
-===============================
+T-TARS Telegram Handlers v1.4.9.2
+=================================
 Telegram bot komut handler'ları.
 
-Kullanım:
-    from app.handlers.telegram_handlers import init_handlers, handle_plan_command, ...
-    
-    # main.py'de service'leri init et
-    init_handlers(telegram, okx, claude, storage, tracking)
+v1.4.9.2:
+- /scan mesajı: coinler alt alta emoji ile
+- /help mesajı: "(BTC + SOL)" kaldırıldı
 """
 
 import logging
@@ -477,11 +475,12 @@ Komutlar için: /help
 
 def handle_scan_command(chat_id):
     """
-    /scan - Manuel market taraması (v1.4.3: multi-timeframe + aktif setup listesi)
+    /scan - Manuel market taraması (v1.4.9.2: coin listesi alt alta)
     """
     try:
-        pair_names = ' + '.join([p.split('/')[0] + 'USDT' for p in Config.AUTO_SCAN_PAIRS])
-        _telegram.send(f"🔍 **Market taraması başlatılıyor...**\n\n⏳ {pair_names} tüm timeframe'lerde analiz ediliyor...", chat_id=chat_id)
+        # v1.4.9.2: Coinleri alt alta emoji ile listele
+        coin_list = '\n'.join([f"📊 {p.split('/')[0]}" for p in Config.AUTO_SCAN_PAIRS])
+        _telegram.send(f"🔍 **Market taraması başlatılıyor...**\n\n{coin_list}\n\n⏳ Tüm timeframe'lerde analiz ediliyor...", chat_id=chat_id)
         
         pairs = Config.AUTO_SCAN_PAIRS
         results = []
@@ -719,7 +718,7 @@ def handle_help_command(chat_id):
 
 📊 `/plan ETHUSDT` - Farklı parite
 
-🔍 `/scan` - Manuel market taraması (BTC + SOL)
+🔍 `/scan` - Manuel market taraması
 📊 `/score` - Performance raporu
 📡 `/status` - Bot durum kontrolü
 ❓ `/help` - Bu mesaj

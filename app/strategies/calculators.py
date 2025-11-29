@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v1.4.4
-=================================
+T-TARS Trading Calculators v1.4.9.3
+===================================
 Tüm katsayılar ve hesaplama fonksiyonları.
 Fine-tuning için sadece bu dosyayı düzenle.
+
+v1.4.9.3:
+- format_price() eklendi - SHIB/DOGE gibi düşük fiyatlı coinler için dinamik format
 
 Kullanım:
     from app.strategies.calculators import (
         calculate_setup_strength,
         calculate_rr,
+        format_price,
         MIN_RR_RATIO,
         STOP_MULTIPLIER,
         TP1_MULTIPLIER,
@@ -71,6 +75,56 @@ WEIGHT_CONFIDENCE = 0.25
 # ============================================
 # FUNCTIONS
 # ============================================
+
+def format_price(price):
+    """
+    Fiyatı dinamik formatta string'e çevir.
+    SHIB/DOGE gibi düşük fiyatlı coinler için 8 ondalık,
+    BTC gibi yüksek fiyatlılar için 2 ondalık kullanır.
+    
+    Args:
+        price: float fiyat değeri
+    
+    Returns:
+        str: Formatlanmış fiyat ($ ile birlikte)
+    
+    Examples:
+        format_price(95000.50) → "$95,000.50"
+        format_price(0.00002345) → "$0.00002345"
+        format_price(235.5678) → "$235.57"
+    """
+    if price is None or price == 0:
+        return "$0.00"
+    
+    abs_price = abs(price)
+    
+    if abs_price < 0.0001:
+        # SHIB gibi çok düşük: 8 ondalık
+        return f"${price:.8f}"
+    elif abs_price < 0.01:
+        # Düşük fiyatlı: 6 ondalık
+        return f"${price:.6f}"
+    elif abs_price < 1:
+        # Orta-düşük: 4 ondalık
+        return f"${price:.4f}"
+    elif abs_price < 100:
+        # Normal: 4 ondalık (SOL, LTC gibi)
+        return f"${price:,.4f}"
+    else:
+        # Yüksek fiyatlı (BTC, ETH, BNB): 2 ondalık
+        return f"${price:,.2f}"
+
+
+def format_price_raw(price):
+    """
+    Fiyatı $ olmadan formatla (log için)
+    
+    Returns:
+        str: Formatlanmış fiyat ($ olmadan)
+    """
+    formatted = format_price(price)
+    return formatted.replace("$", "")
+
 
 def calculate_rr(entry_price, stop_price, tp_price):
     """

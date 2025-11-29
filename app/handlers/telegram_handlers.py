@@ -479,7 +479,7 @@ def handle_scan_command(chat_id):
     """
     try:
         # v1.4.9.2: Coinleri alt alta emoji ile listele
-        coin_list = '\n'.join([f"📊 {p.split('/')[0]}" for p in Config.AUTO_SCAN_PAIRS])
+        coin_list = '\n'.join([f"🧪 {p.split('/')[0]}" for p in Config.AUTO_SCAN_PAIRS])
         _telegram.send(f"🔍 **Market taraması başlatılıyor...**\n\n{coin_list}\n\n⏳ Tüm timeframe'lerde analiz ediliyor...", chat_id=chat_id)
         
         pairs = Config.AUTO_SCAN_PAIRS

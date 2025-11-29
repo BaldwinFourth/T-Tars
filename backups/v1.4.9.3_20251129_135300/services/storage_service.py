@@ -178,10 +178,6 @@ class StorageService:
         text = text.replace('}', '')
         text = text.replace('.', ' ')
         text = text.replace('/', ' ')
-	text = text.replace('→', '->')
-	text = text.replace('<', '')
-	text = text.replace('$', '')
-
         # Multiple spaces to single
         while '  ' in text:
             text = text.replace('  ', ' ')

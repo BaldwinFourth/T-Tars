@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v1.4.9.1
+T-TARS OB Detector v1.4.9.3
 ===========================
 Order Block setup detection (LONG + SHORT)
-volume_confirmed field kullanılıyor
+
+v1.4.9.3:
+- format_price() kullanılıyor (SHIB/DOGE desteği)
 """
 
 import logging
 from app.config import Config
 from app.strategies.calculators import (
     calculate_setup_strength,
+    format_price,
     MIN_RR_RATIO,
     STOP_MULTIPLIER,
     TP1_MULTIPLIER,
@@ -32,23 +35,27 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
             logger.info(f"OB LONG rejected: volume_confirmed=False")
             return None
         
-        entry_zone = f"${ob['low']:,.2f} - ${ob['price']:,.2f}"
+        # Entry hesaplama
         entry_price = (ob['low'] + ob['price']) / 2  # OB mid-point
+        entry_zone = f"{format_price(ob['low'])} - {format_price(ob['price'])}"
         
+        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = ob['low'] - stop_distance
-        stop_loss = f"${stop_price:,.2f}"
+        stop_loss = format_price(stop_price)
         
+        # TP hesaplama
         tp1_price = entry_price + (atr * TP1_MULTIPLIER)
         tp2_price = entry_price + (atr * TP2_MULTIPLIER)
-        tp1 = f"${tp1_price:,.2f}"
-        tp2 = f"${tp2_price:,.2f}"
+        tp1 = format_price(tp1_price)
+        tp2 = format_price(tp2_price)
         
+        # R:R hesaplama
         risk = abs(entry_price - stop_price)
         reward = abs(tp1_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 OB LONG R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        logger.info(f"📊 OB LONG R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"OB LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
@@ -68,7 +75,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
         
         detailed_explanation = f"""
 📊 **OB Analizi:**
-• Bullish OB @ ${ob['low']:,.2f} - ${ob['price']:,.2f}
+• Bullish OB @ {format_price(ob['low'])} - {format_price(ob['price'])}
 • Volume confirmed: ✅
 • OB strength: {ob['strength'].upper()}
 • Timeframe: {timeframe.upper()}
@@ -76,7 +83,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
 
 📈 **TP/Stop:**
-• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• ATR: {format_price(atr)} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
         
@@ -97,7 +104,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
             'ob_strength': ob['strength'],
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"Bullish OB @ ${ob['low']:,.2f}\nVolume confirmed"
+            'details': f"Bullish OB @ {format_price(ob['low'])}\nVolume confirmed"
         }
         
     except Exception as e:
@@ -118,23 +125,27 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
             logger.info(f"OB SHORT rejected: volume_confirmed=False")
             return None
         
-        entry_zone = f"${ob['price']:,.2f} - ${ob['high']:,.2f}"
+        # Entry hesaplama
         entry_price = (ob['price'] + ob['high']) / 2  # OB mid-point
+        entry_zone = f"{format_price(ob['price'])} - {format_price(ob['high'])}"
         
+        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = ob['high'] + stop_distance
-        stop_loss = f"${stop_price:,.2f}"
+        stop_loss = format_price(stop_price)
         
+        # TP hesaplama
         tp1_price = entry_price - (atr * TP1_MULTIPLIER)
         tp2_price = entry_price - (atr * TP2_MULTIPLIER)
-        tp1 = f"${tp1_price:,.2f}"
-        tp2 = f"${tp2_price:,.2f}"
+        tp1 = format_price(tp1_price)
+        tp2 = format_price(tp2_price)
         
+        # R:R hesaplama
         risk = abs(stop_price - entry_price)
         reward = abs(entry_price - tp1_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 OB SHORT R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        logger.info(f"📊 OB SHORT R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"OB SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
@@ -154,7 +165,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
         
         detailed_explanation = f"""
 📊 **OB Analizi:**
-• Bearish OB @ ${ob['price']:,.2f} - ${ob['high']:,.2f}
+• Bearish OB @ {format_price(ob['price'])} - {format_price(ob['high'])}
 • Volume confirmed: ✅
 • OB strength: {ob['strength'].upper()}
 • Timeframe: {timeframe.upper()}
@@ -162,7 +173,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
 
 📉 **TP/Stop:**
-• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• ATR: {format_price(atr)} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
         
@@ -183,7 +194,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
             'ob_strength': ob['strength'],
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"Bearish OB @ ${ob['high']:,.2f}\nVolume confirmed"
+            'details': f"Bearish OB @ {format_price(ob['high'])}\nVolume confirmed"
         }
         
     except Exception as e:

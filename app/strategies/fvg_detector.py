@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v1.4.9.1
+T-TARS FVG Detector v1.4.9.3
 ============================
 Fair Value Gap setup detection (LONG + SHORT)
-volume_confirmed field kullanılıyor
+
+v1.4.9.3:
+- format_price() kullanılıyor (SHIB/DOGE desteği)
 """
 
 import logging
 from app.config import Config
 from app.strategies.calculators import (
     calculate_setup_strength,
+    format_price,
     MIN_RR_RATIO,
     STOP_MULTIPLIER,
     TP1_MULTIPLIER,
@@ -32,23 +35,27 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
             logger.info(f"FVG LONG rejected: volume_confirmed=False")
             return None
         
-        entry_zone = f"${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}"
+        # Entry hesaplama
         entry_price = (fvg['gap_low'] + fvg['gap_high']) / 2  # FVG mid-point
+        entry_zone = f"{format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}"
         
+        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = fvg['gap_low'] - stop_distance
-        stop_loss = f"${stop_price:,.2f}"
+        stop_loss = format_price(stop_price)
         
+        # TP hesaplama
         tp1_price = entry_price + (atr * TP1_MULTIPLIER)
         tp2_price = entry_price + (atr * TP2_MULTIPLIER)
-        tp1 = f"${tp1_price:,.2f}"
-        tp2 = f"${tp2_price:,.2f}"
+        tp1 = format_price(tp1_price)
+        tp2 = format_price(tp2_price)
         
+        # R:R hesaplama
         risk = abs(entry_price - stop_price)
         reward = abs(tp1_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 FVG LONG R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        logger.info(f"📊 FVG LONG R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"FVG LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
@@ -69,15 +76,15 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
         
         detailed_explanation = f"""
 📊 **FVG Analizi:**
-• Bullish FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}
-• Gap size: ${fvg['gap_size']:,.2f}
+• Bullish FVG: {format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}
+• Gap size: {format_price(fvg['gap_size'])}
 • Volume confirmed: ✅
 • Timeframe: {timeframe.upper()}
 
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
 
 📈 **TP/Stop:**
-• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• ATR: {format_price(atr)} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
         
@@ -98,7 +105,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
             'fvg_strength': fvg_strength,
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume confirmed"
+            'details': f"FVG: {format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}\nVolume confirmed"
         }
         
     except Exception as e:
@@ -119,23 +126,27 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
             logger.info(f"FVG SHORT rejected: volume_confirmed=False")
             return None
         
-        entry_zone = f"${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}"
+        # Entry hesaplama
         entry_price = (fvg['gap_low'] + fvg['gap_high']) / 2  # FVG mid-point
+        entry_zone = f"{format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}"
         
+        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = fvg['gap_high'] + stop_distance
-        stop_loss = f"${stop_price:,.2f}"
+        stop_loss = format_price(stop_price)
         
+        # TP hesaplama
         tp1_price = entry_price - (atr * TP1_MULTIPLIER)
         tp2_price = entry_price - (atr * TP2_MULTIPLIER)
-        tp1 = f"${tp1_price:,.2f}"
-        tp2 = f"${tp2_price:,.2f}"
+        tp1 = format_price(tp1_price)
+        tp2 = format_price(tp2_price)
         
+        # R:R hesaplama
         risk = abs(stop_price - entry_price)
         reward = abs(entry_price - tp1_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 FVG SHORT R:R: {rr_ratio:.2f} (entry=${entry_price:.2f})")
+        logger.info(f"📊 FVG SHORT R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"FVG SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
@@ -156,15 +167,15 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
         
         detailed_explanation = f"""
 📊 **FVG Analizi:**
-• Bearish FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}
-• Gap size: ${fvg['gap_size']:,.2f}
+• Bearish FVG: {format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}
+• Gap size: {format_price(fvg['gap_size'])}
 • Volume confirmed: ✅
 • Timeframe: {timeframe.upper()}
 
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
 
 📉 **TP/Stop:**
-• ATR: ${atr:,.2f} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
+• ATR: {format_price(atr)} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
         
@@ -185,7 +196,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
             'fvg_strength': fvg_strength,
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume confirmed"
+            'details': f"FVG: {format_price(fvg['gap_low'])} - {format_price(fvg['gap_high'])}\nVolume confirmed"
         }
         
     except Exception as e:

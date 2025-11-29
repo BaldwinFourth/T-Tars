@@ -1,24 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-T-TARS OKX Service v1.4.9.4
-===========================
-OKX Exchange Service - Market Data + Smart Money Detection
-
-v1.4.9.4:
-- ATR round(atr, 8) - SHIB/DOGE gibi düşük fiyatlı coinler için
-"""
-
 import ccxt
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import logging
-
-# Turkey timezone (UTC+3)
-TURKEY_TZ = timezone(timedelta(hours=3))
-
-def get_turkey_time():
-    """Get current time in Turkey timezone"""
-    return datetime.now(TURKEY_TZ)
-
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +81,7 @@ class OKXService:
                 'low': prev_candle[3],
                 'close': prev_candle[4],
                 'volume': prev_candle[5],
-                'date': datetime.fromtimestamp(prev_candle[0]/1000, tz=TURKEY_TZ).strftime('%Y-%m-%d'),
+                'date': datetime.fromtimestamp(prev_candle[0]/1000).strftime('%Y-%m-%d'),
                 'candle_type': 'green' if prev_candle[4] > prev_candle[1] else 'red'
             }
             
@@ -110,7 +92,7 @@ class OKXService:
             raise
     
     def calculate_atr(self, ticker="BTC/USDT", timeframe='1d', period=14):
-        """ATR(14) hesapla - v1.4.9.4: round(8) for low price coins"""
+        """ATR(14) hesapla"""
         try:
             ohlcv = self.get_ohlcv(ticker, timeframe, limit=period+1)
             
@@ -128,8 +110,8 @@ class OKXService:
                 tr_list.append(tr)
             
             atr = sum(tr_list[-period:]) / period
-            logger.info(f"ATR({period}) {ticker} {timeframe}: {atr:.8f}")
-            return round(atr, 8)  # v1.4.9.4: 8 decimal for SHIB/DOGE
+            logger.info(f"ATR({period}) {ticker} {timeframe}: {atr:.2f}")
+            return round(atr, 2)
         except Exception as e:
             logger.error(f"OKX ATR error: {e}")
             raise
@@ -186,10 +168,10 @@ class OKXService:
                 'high': high,
                 'low': low,
                 'candle_type': candle_type,
-                'levels': {k: round(v, 8) for k, v in levels.items()}  # v1.4.9.4: 8 decimal
+                'levels': {k: round(v, 2) for k, v in levels.items()}
             }
             
-            logger.info(f"Fibonacci {ticker} ({candle_type}): {low:.8f} - {high:.8f}")
+            logger.info(f"Fibonacci {ticker} ({candle_type}): {low:.2f} - {high:.2f}")
             return result
         except Exception as e:
             logger.error(f"OKX Fibonacci error: {e}")
@@ -438,8 +420,8 @@ class OKXService:
             stop_price = current_price - fixed_amount
             
             return {
-                'current_price': round(current_price, 8),  # v1.4.9.4
-                'stop_price': round(stop_price, 8),  # v1.4.9.4
+                'current_price': round(current_price, 2),
+                'stop_price': round(stop_price, 2),
                 'distance': fixed_amount
             }
         except Exception as e:
@@ -460,7 +442,6 @@ class OKXService:
             atr_4h = self.calculate_atr(ticker, '4h', 14)
             atr_1h = self.calculate_atr(ticker, '1h', 14)
             atr_15m = self.calculate_atr(ticker, '15m', 14)
-            atr_5m = self.calculate_atr(ticker, '5m', 14)
             atr_3m = self.calculate_atr(ticker, '3m', 14)
             
             # 2m optional (may not be available)
@@ -481,7 +462,6 @@ class OKXService:
             ohlcv_4h = self.get_ohlcv(ticker, '4h', limit=48)
             ohlcv_1h = self.get_ohlcv(ticker, '1h', limit=24)
             ohlcv_15m = self.get_ohlcv(ticker, '15m', limit=24)
-            ohlcv_5m = self.get_ohlcv(ticker, '5m', limit=30)
             ohlcv_3m = self.get_ohlcv(ticker, '3m', limit=30)
             
             # 2m optional
@@ -496,7 +476,6 @@ class OKXService:
             volume_4h = self.analyze_volume(ohlcv_4h, lookback=20)
             volume_1h = self.analyze_volume(ohlcv_1h, lookback=20)
             volume_15m = self.analyze_volume(ohlcv_15m, lookback=20)
-            volume_5m = self.analyze_volume(ohlcv_5m, lookback=20)
             volume_3m = self.analyze_volume(ohlcv_3m, lookback=20)
             
             # 2m volume optional
@@ -509,21 +488,19 @@ class OKXService:
             obs_4h = self.detect_order_blocks(ticker, '4h', lookback=50)
             obs_1h = self.detect_order_blocks(ticker, '1h', lookback=50)
             obs_15m = self.detect_order_blocks(ticker, '15m', lookback=50)
-            obs_5m = self.detect_order_blocks(ticker, '5m', lookback=50)
             obs_3m = self.detect_order_blocks(ticker, '3m', lookback=50)
             
             fvgs_4h = self.detect_fair_value_gaps(ticker, '4h', lookback=50)
             fvgs_1h = self.detect_fair_value_gaps(ticker, '1h', lookback=50)
             fvgs_15m = self.detect_fair_value_gaps(ticker, '15m', lookback=50)
-            fvgs_5m = self.detect_fair_value_gaps(ticker, '5m', lookback=50)
             fvgs_3m = self.detect_fair_value_gaps(ticker, '3m', lookback=50)
             
             sweep_1h = self.detect_liquidity_sweep(ticker, '1h', lookback=50)
             
             result = {
                 'ticker': ticker,
-                'current_date': get_turkey_time().strftime('%Y-%m-%d'),
-                'current_time': get_turkey_time().strftime('%H:%M:%S'),
+                'current_date': datetime.now().strftime('%Y-%m-%d'),
+                'current_time': datetime.now().strftime('%H:%M:%S'),
                 'current_price': current_price,
                 
                 'previous_day': prev_candle,
@@ -533,7 +510,6 @@ class OKXService:
                     '4h': atr_4h,
                     '1h': atr_1h,
                     '15m': atr_15m,
-                    '5m': atr_5m,
                     '3m': atr_3m,
                     '2m': atr_2m if atr_2m else 'N/A'
                 },
@@ -546,7 +522,6 @@ class OKXService:
                     '4h': volume_4h,
                     '1h': volume_1h,
                     '15m': volume_15m,
-                    '5m': volume_5m,
                     '3m': volume_3m,
                     '2m': volume_2m if volume_2m else 'N/A'
                 },
@@ -556,14 +531,12 @@ class OKXService:
                         '4h': obs_4h,
                         '1h': obs_1h,
                         '15m': obs_15m,
-                        '5m': obs_5m,
                         '3m': obs_3m
                     },
                     'fair_value_gaps': {
                         '4h': fvgs_4h,
                         '1h': fvgs_1h,
                         '15m': fvgs_15m,
-                        '5m': fvgs_5m,
                         '3m': fvgs_3m
                     },
                     'liquidity_sweep': sweep_1h

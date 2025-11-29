@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v1.4.9.3
+T-TARS Trading Calculators v1.4.9.4
 ===================================
 Tüm katsayılar ve hesaplama fonksiyonları.
 Fine-tuning için sadece bu dosyayı düzenle.
 
-v1.4.9.3:
-- format_price() eklendi - SHIB/DOGE gibi düşük fiyatlı coinler için dinamik format
+v1.4.9.4:
+- TP1_MULTIPLIER 2.0 -> 3.0 (R:R = 3.0/1.5 = 2.0)
+- format_price() - SHIB/DOGE gibi düşük fiyatlı coinler için dinamik format
 
 Kullanım:
     from app.strategies.calculators import (
@@ -24,8 +25,8 @@ Kullanım:
 # ATR MULTIPLIERS - STOP & TP
 # ============================================
 STOP_MULTIPLIER = 1.5      # Stop = OB edge - (ATR × 1.5)
-TP1_MULTIPLIER = 2.0       # TP1 = Entry + (ATR × 2.0)
-TP2_MULTIPLIER = 3.5       # TP2 = Entry + (ATR × 3.5)
+TP1_MULTIPLIER = 3.0       # TP1 = Entry + (ATR × 3.0) → R:R = 3.0/1.5 = 2.0
+TP2_MULTIPLIER = 4.5       # TP2 = Entry + (ATR × 4.5) → R:R = 4.5/1.5 = 3.0
 
 # ============================================
 # R:R THRESHOLDS

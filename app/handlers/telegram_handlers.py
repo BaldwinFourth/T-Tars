@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.9.2
+T-TARS Telegram Handlers v1.4.9.3
 =================================
 Telegram bot komut handler'ları.
 
-v1.4.9.2:
+v1.4.9.3:
+- /help mesajı: telegram markdown fix
 - /scan mesajı: coinler alt alta emoji ile
-- /help mesajı: "(BTC + SOL)" kaldırıldı
 """
 
 import logging
@@ -696,34 +696,19 @@ _Yeni setup'lar /scan ile oluşturulabilir._
 def handle_help_command(chat_id):
     """Yardım mesajı"""
     
-    try:
-        version_features = _storage.parse_version_features(Config.VERSION)
-        if version_features:
-            features_text = "\n".join(version_features)
-        else:
-            features_text = f"📄 Detaylar için: CHANGELOG v{Config.VERSION}"
-    except Exception as e:
-        logger.warning(f"⚠️ Could not load changelog features: {e}")
-        features_text = f"📄 Detaylar için: CHANGELOG v{Config.VERSION}"
-    
     help_text = f"""
-🤖 *T-TARS Trading Bot v{Config.VERSION}*
+🤖 **T-TARS Trading Bot v{Config.VERSION}**
 
-📊 `/plan` - BTCUSDT için tam analiz
-   • Gerçek OKX data
-   • Volume analizi
-   • OB/FVG/Sweep detection
-   • Multi-timeframe ATR
-   • Dinamik Fibonacci
+📊 /plan - BTCUSDT icin tam analiz
+📊 /plan ETHUSDT - Farkli parite
+🔍 /scan - Manuel market taramasi
+📊 /score - Performance raporu
+📡 /status - Bot durum kontrolu
+❓ /help - Bu mesaj
 
-📊 `/plan ETHUSDT` - Farklı parite
+🆕 **Desteklenen Coinler:**
+BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
 
-🔍 `/scan` - Manuel market taraması
-📊 `/score` - Performance raporu
-📡 `/status` - Bot durum kontrolü
-❓ `/help` - Bu mesaj
-
-🆕 *v{Config.VERSION} Yenilikler:*
-{features_text}
+⏰ Auto-scan her 3 dakikada calisir
 """
     _telegram.send(help_text, chat_id=chat_id)

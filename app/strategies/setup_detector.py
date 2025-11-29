@@ -1,20 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v1.4.9
-============================
+T-TARS Setup Detector v1.4.9.1
+==============================
 Trading setup orchestrator.
 OB, FVG, Volume modüllerini import eder.
 
-v1.4.9:
-- ob_detector.py, fvg_detector.py, volume_analyzer.py ayrıldı
-- Fonksiyon isimleri kısaltıldı
-- Kod tekrarı kaldırıldı
+v1.4.9.1:
+- Genel volume spike kontrolü kaldırıldı
+- OB/FVG'nin kendi volume_confirmed field'ı kullanılıyor
 """
 
 import logging
 from app.strategies.ob_detector import detect_ob_long, detect_ob_short
 from app.strategies.fvg_detector import detect_fvg_long, detect_fvg_short
-from app.strategies.volume_analyzer import has_volume_spike, select_best_volume
+from app.strategies.volume_analyzer import select_best_volume
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +34,10 @@ def detect_trading_setup(pair, market_data):
         bias = 'bullish' if pdc['candle_type'] == 'green' else 'bearish'
         current_price = market_data['current_price']
         
-        # Volume seç
+        # Volume seç (info için)
         volume_5m = market_data['volume']['5m']
         volume_3m = market_data['volume']['3m']
         volume, timeframe = select_best_volume(volume_5m, volume_3m)
-        
-        # Volume spike yoksa çık
-        if not has_volume_spike(volume):
-            logger.info(f"🔍 {pair}: No volume spike")
-            return False
         
         # OB ve FVG data
         obs = market_data['smart_money']['order_blocks'].get(timeframe, [])
@@ -52,9 +46,9 @@ def detect_trading_setup(pair, market_data):
         # ATR
         atr = market_data['atr'].get(timeframe, market_data['atr']['15m'])
         
-        logger.info(f"🔍 {pair}: volume_spike={volume['spike_ratio']:.1f}x, OB={len(obs)}, FVG={len(fvgs)}, bias={bias}, TF={timeframe}")
+        logger.info(f"🔍 {pair}: OB={len(obs)}, FVG={len(fvgs)}, bias={bias}, TF={timeframe}")
         
-        # OB Setup kontrol
+        # OB Setup kontrol (volume_confirmed OB içinde kontrol edilecek)
         if len(obs) > 0:
             ob = obs[0]
             if bias == 'bullish' and ob['type'] == 'bullish':
@@ -66,7 +60,7 @@ def detect_trading_setup(pair, market_data):
                 if setup:
                     return setup
         
-        # FVG Setup kontrol
+        # FVG Setup kontrol (volume_confirmed FVG içinde kontrol edilecek)
         if len(fvgs) > 0:
             fvg = fvgs[0]
             if bias == 'bullish' and fvg['type'] == 'bullish':
@@ -102,36 +96,35 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price):
         # ATR mapping
         atr = market_data['atr'].get(timeframe, market_data['atr'].get('15m', 0))
         
-        # Volume spike yoksa çık
-        if not has_volume_spike(volume):
-            return []
+        # Debug log
+        logger.info(f"📊 {pair} {timeframe.upper()}: OB={len(obs)}, FVG={len(fvgs)}, bias={bias}")
         
-        # OB Setup kontrol
+        # OB Setup kontrol (volume_confirmed OB içinde)
         if len(obs) > 0:
             ob = obs[0]
             if bias == 'bullish' and ob['type'] == 'bullish':
                 setup = detect_ob_long(ob, volume, atr, timeframe, current_price)
                 if setup:
-                    logger.info(f"📊 {pair} {timeframe.upper()} LONG OB R:R: {setup['rr_ratio']:.2f}")
+                    logger.info(f"✅ {pair} {timeframe.upper()} LONG OB R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
             elif bias == 'bearish' and ob['type'] == 'bearish':
                 setup = detect_ob_short(ob, volume, atr, timeframe, current_price)
                 if setup:
-                    logger.info(f"📊 {pair} {timeframe.upper()} SHORT OB R:R: {setup['rr_ratio']:.2f}")
+                    logger.info(f"✅ {pair} {timeframe.upper()} SHORT OB R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
         
-        # FVG Setup kontrol
+        # FVG Setup kontrol (volume_confirmed FVG içinde)
         if len(fvgs) > 0:
             fvg = fvgs[0]
             if bias == 'bullish' and fvg['type'] == 'bullish':
                 setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price)
                 if setup:
-                    logger.info(f"📊 {pair} {timeframe.upper()} LONG FVG R:R: {setup['rr_ratio']:.2f}")
+                    logger.info(f"✅ {pair} {timeframe.upper()} LONG FVG R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
             elif bias == 'bearish' and fvg['type'] == 'bearish':
                 setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price)
                 if setup:
-                    logger.info(f"📊 {pair} {timeframe.upper()} SHORT FVG R:R: {setup['rr_ratio']:.2f}")
+                    logger.info(f"✅ {pair} {timeframe.upper()} SHORT FVG R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
         
         return setups

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v1.4.9
-==========================
+T-TARS FVG Detector v1.4.9.1
+============================
 Fair Value Gap setup detection (LONG + SHORT)
+volume_confirmed field kullanılıyor
 """
 
 import logging
@@ -26,6 +27,11 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
         dict: Setup bilgileri veya None
     """
     try:
+        # Volume confirmed kontrolü (FVG bulunduğu andaki volume)
+        if not fvg.get('volume_confirmed', False):
+            logger.info(f"FVG LONG rejected: volume_confirmed=False")
+            return None
+        
         entry_zone = f"${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}"
         entry_price = (fvg['gap_low'] + fvg['gap_high']) / 2  # FVG mid-point
         
@@ -51,8 +57,9 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
         # Risk hesabı
         fvg_strength = fvg.get('volume_strength', 'medium')
         balance = Config.DEFAULT_BALANCE
+        volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
-            volume_spike_ratio=volume['spike_ratio'],
+            volume_spike_ratio=volume_spike_ratio,
             ob_or_fvg_strength=fvg_strength,
             rr_ratio=rr_ratio,
             confidence='MEDIUM'
@@ -64,7 +71,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
 📊 **FVG Analizi:**
 • Bullish FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}
 • Gap size: ${fvg['gap_size']:,.2f}
-• Volume spike: {volume['spike_ratio']:.1f}x
+• Volume confirmed: ✅
 • Timeframe: {timeframe.upper()}
 
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
@@ -87,11 +94,11 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
             'stop_price': stop_price,
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
-            'volume_spike_ratio': volume['spike_ratio'],
+            'volume_spike_ratio': volume_spike_ratio,
             'fvg_strength': fvg_strength,
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume: {volume['spike_ratio']}x"
+            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume confirmed"
         }
         
     except Exception as e:
@@ -107,6 +114,11 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
         dict: Setup bilgileri veya None
     """
     try:
+        # Volume confirmed kontrolü (FVG bulunduğu andaki volume)
+        if not fvg.get('volume_confirmed', False):
+            logger.info(f"FVG SHORT rejected: volume_confirmed=False")
+            return None
+        
         entry_zone = f"${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}"
         entry_price = (fvg['gap_low'] + fvg['gap_high']) / 2  # FVG mid-point
         
@@ -132,8 +144,9 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
         # Risk hesabı
         fvg_strength = fvg.get('volume_strength', 'medium')
         balance = Config.DEFAULT_BALANCE
+        volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
-            volume_spike_ratio=volume['spike_ratio'],
+            volume_spike_ratio=volume_spike_ratio,
             ob_or_fvg_strength=fvg_strength,
             rr_ratio=rr_ratio,
             confidence='MEDIUM'
@@ -145,7 +158,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
 📊 **FVG Analizi:**
 • Bearish FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}
 • Gap size: ${fvg['gap_size']:,.2f}
-• Volume spike: {volume['spike_ratio']:.1f}x
+• Volume confirmed: ✅
 • Timeframe: {timeframe.upper()}
 
 🎯 **Entry:** {entry_zone} | Risk: {risk_percent:.1f}% (${risk_usd:,.0f})
@@ -168,11 +181,11 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
             'stop_price': stop_price,
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
-            'volume_spike_ratio': volume['spike_ratio'],
+            'volume_spike_ratio': volume_spike_ratio,
             'fvg_strength': fvg_strength,
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume: {volume['spike_ratio']}x"
+            'details': f"FVG: ${fvg['gap_low']:,.2f} - ${fvg['gap_high']:,.2f}\nVolume confirmed"
         }
         
     except Exception as e:

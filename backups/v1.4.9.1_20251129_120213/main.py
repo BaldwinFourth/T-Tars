@@ -339,7 +339,7 @@ def monitor_setups():
 def auto_analyze():
     """Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz"""
     try:
-        pairs = Config.AUTO_SCAN_PAIRS
+        pairs = ['BTC/USDT:USDT', 'SOL/USDT:USDT']
         results = []
         total_setups = 0
         

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v1.4.9
-=========================
+T-TARS OB Detector v1.4.9.1
+===========================
 Order Block setup detection (LONG + SHORT)
+volume_confirmed field kullanılıyor
 """
 
 import logging
@@ -26,6 +27,11 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
         dict: Setup bilgileri veya None
     """
     try:
+        # Volume confirmed kontrolü (OB bulunduğu andaki volume)
+        if not ob.get('volume_confirmed', False):
+            logger.info(f"OB LONG rejected: volume_confirmed=False")
+            return None
+        
         entry_zone = f"${ob['low']:,.2f} - ${ob['price']:,.2f}"
         entry_price = (ob['low'] + ob['price']) / 2  # OB mid-point
         
@@ -50,8 +56,9 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
         
         # Risk hesabı
         balance = Config.DEFAULT_BALANCE
+        volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
-            volume_spike_ratio=volume['spike_ratio'],
+            volume_spike_ratio=volume_spike_ratio,
             ob_or_fvg_strength=ob['strength'],
             rr_ratio=rr_ratio,
             confidence='HIGH'
@@ -62,7 +69,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
         detailed_explanation = f"""
 📊 **OB Analizi:**
 • Bullish OB @ ${ob['low']:,.2f} - ${ob['price']:,.2f}
-• Volume spike: {volume['spike_ratio']:.1f}x ({volume['strength'].upper()})
+• Volume confirmed: ✅
 • OB strength: {ob['strength'].upper()}
 • Timeframe: {timeframe.upper()}
 
@@ -86,11 +93,11 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price):
             'stop_price': stop_price,
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
-            'volume_spike_ratio': volume['spike_ratio'],
+            'volume_spike_ratio': volume_spike_ratio,
             'ob_strength': ob['strength'],
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"Bullish OB @ ${ob['low']:,.2f}\nVolume: {volume['spike_ratio']}x spike"
+            'details': f"Bullish OB @ ${ob['low']:,.2f}\nVolume confirmed"
         }
         
     except Exception as e:
@@ -106,6 +113,11 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
         dict: Setup bilgileri veya None
     """
     try:
+        # Volume confirmed kontrolü (OB bulunduğu andaki volume)
+        if not ob.get('volume_confirmed', False):
+            logger.info(f"OB SHORT rejected: volume_confirmed=False")
+            return None
+        
         entry_zone = f"${ob['price']:,.2f} - ${ob['high']:,.2f}"
         entry_price = (ob['price'] + ob['high']) / 2  # OB mid-point
         
@@ -130,8 +142,9 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
         
         # Risk hesabı
         balance = Config.DEFAULT_BALANCE
+        volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
-            volume_spike_ratio=volume['spike_ratio'],
+            volume_spike_ratio=volume_spike_ratio,
             ob_or_fvg_strength=ob['strength'],
             rr_ratio=rr_ratio,
             confidence='HIGH'
@@ -142,7 +155,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
         detailed_explanation = f"""
 📊 **OB Analizi:**
 • Bearish OB @ ${ob['price']:,.2f} - ${ob['high']:,.2f}
-• Volume spike: {volume['spike_ratio']:.1f}x ({volume['strength'].upper()})
+• Volume confirmed: ✅
 • OB strength: {ob['strength'].upper()}
 • Timeframe: {timeframe.upper()}
 
@@ -166,11 +179,11 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price):
             'stop_price': stop_price,
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
-            'volume_spike_ratio': volume['spike_ratio'],
+            'volume_spike_ratio': volume_spike_ratio,
             'ob_strength': ob['strength'],
             'rr_ratio': rr_ratio,
             'detailed_explanation': detailed_explanation,
-            'details': f"Bearish OB @ ${ob['high']:,.2f}\nVolume: {volume['spike_ratio']}x spike"
+            'details': f"Bearish OB @ ${ob['high']:,.2f}\nVolume confirmed"
         }
         
     except Exception as e:

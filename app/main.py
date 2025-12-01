@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v1.4.9.6
+T-TARS Trading Bot v1.4.9.7
 ===========================
 Main Flask application with routes.
-Handlers moved to app/handlers/telegram_handlers.py
+
+v1.4.9.7:
+- SETUP DETECTED mesajı kompakt
+- format_price ile detaylı fiyatlar
+- TP HIT mesajı kompakt
 
 v1.4.9.6:
 - monitor: get_all_pending_setups dict döndürüyor fix
@@ -40,6 +44,27 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
+
+
+def format_price(price):
+    """
+    Dinamik fiyat formatı - düşük fiyatlı coinler için daha fazla basamak
+    """
+    if price is None or price == 0:
+        return "$0.00"
+    
+    abs_price = abs(float(price))
+    
+    if abs_price < 0.0001:
+        return f"${price:.8f}"
+    elif abs_price < 0.01:
+        return f"${price:.6f}"
+    elif abs_price < 1:
+        return f"${price:.4f}"
+    elif abs_price < 100:
+        return f"${price:.4f}"
+    else:
+        return f"${price:,.2f}"
 
 # Flask app
 app = Flask(__name__)
@@ -282,28 +307,24 @@ def monitor_setups():
                         next_action = ''
                     
                     # Duration text
-                    duration_text = f"⏱️ Duration: {duration:.1f} minutes\n" if duration > 0 else ""
+                    duration_text = f"⏱️ {duration:.1f}m\n" if duration > 0 else ""
                     
-                    # Movement text (v1.4.8: entry → target arası)
-                    movement_text = f"📊 Movement: ${movement:.2f}\n" if movement > 0 else ""
+                    # Movement text (format_price ile)
+                    movement_text = f"📊 Move: {format_price(movement)}\n" if movement > 0 else ""
                     
                     broadcast_message = f"""
 {emoji} **SETUP #{setup_id[:8].upper()} → {status_text}** {header_emoji}
 
-📊 **Parite:** {pair}
-🎯 **Setup Type:** {setup_type}
-⏱️ **Timeframe:** {timeframe.upper() if isinstance(timeframe, str) else timeframe}
-{status_emoji} **Entry:** ${entry_price:,.2f} → **{new_status}:** ${current_price:,.2f}
-💰 **Profit:** {'+' if profit >= 0 else ''}{profit_percent:+.2f}% (${profit:+,.2f})
+📊 Parite: {pair}
+🎯 Setup: {setup_type}
+⏱️ TF: {timeframe.upper() if isinstance(timeframe, str) else timeframe}
+{status_emoji} Entry: {format_price(entry_price)} → {new_status}: {format_price(current_price)}
+💰 P/L: {'+' if profit >= 0 else ''}{profit_percent:.2f}% (${profit:+.2f})
 {movement_text}{duration_text}{next_action}
 
----
-📈 **Current Stats:**
-• Total Setups: {stats['total_setups']}
-• Win Rate: {stats['win_rate']:.1f}%
-• Current Balance: ${stats['current_balance']:,.2f} ({stats['profit_percent']:+.1f}%)
+📈 Stats: {stats['winning_trades']}W/{stats['losing_trades']}L ({stats['win_rate']:.0f}%) | ${stats['current_balance']:,.0f}
 
-⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+⏰ {get_turkey_time().strftime('%H:%M:%S')}
 """
                     
                     telegram.send_signal(broadcast_message)
@@ -394,8 +415,7 @@ def auto_analyze():
                         except Exception as track_error:
                             logger.error(f"❌ Tracking failed: {track_error}")
                         
-                        message = f"""```
-🚨 SETUP DETECTED!
+                        message = f"""🚨 **SETUP DETECTED!**
 
 📊 Parite: {pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')}
 🎯 Setup: {setup['type']}
@@ -403,23 +423,14 @@ def auto_analyze():
 {"🔴 Bias: SHORT" if 'SHORT' in setup['type'] else "🟢 Bias: LONG"}
 ⚡ Confidence: {setup['confidence']}
 
-💰 Mevcut Fiyat: ${market_data['current_price']:,.2f}
-🎯 Entry Zone: {entry_zone}
-🛡️ Stop Loss: {stop_loss}
-🎁 TP1 (Tars TP): {tp1}
-🎁 TP2 (Kadircan TP): {tp2}
-📅 Time: {market_data['current_time']}
-```
+💰 Fiyat: {format_price(market_data['current_price'])}
+🎯 Entry: {entry_zone}
+🛡️ Stop: {stop_loss}
+🎁 TP1: {tp1}
+🎁 TP2: {tp2}
+📊 R:R: 1:{setup.get('rr_ratio', 0):.1f}
 
----
-**📊 Detaylar:**
-
-{detailed_explanation}
-
----
-🤖 **AI Genel Düşünceler:**
-
-_"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop tight ama realistic, TP mantıklı seviyede. Entry zone'da patience kritik - aggressive giriş riskli. R:R oranı solid setup sunuyor."_
+⏰ {market_data['current_time']}
 """
                         telegram.send_signal(message)
                         total_setups += 1

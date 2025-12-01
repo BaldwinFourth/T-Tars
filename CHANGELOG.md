@@ -1,5 +1,14 @@
 # T-TARS CHANGELOG
 
+## v1.4.9.7 (2025-12-01)
+
+### Changed
+- SETUP DETECTED mesaji kompakt (detaylar ve AI dusunceler kaldirildi)
+- TP HIT mesaji kompakt (tek satir stats)
+- format_price() ile detayli fiyatlar (DOGE $0.1431 gibi)
+- Duration: "5.1 minutes" → "5.1m"
+- Movement: "$0.01" → "$0.0100"
+
 ## v1.4.9.6 (2025-12-01)
 
 ### Added

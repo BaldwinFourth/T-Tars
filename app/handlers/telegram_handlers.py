@@ -590,16 +590,16 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
                     tf_parts = []
                     for tf in tf_order:
                         if tf in tf_breakdown:
-                            tf_parts.append(f"{tf.upper()}: {tf_breakdown[tf]}")
+                            tf_parts.append(f"{tf}: {tf_breakdown[tf]}")
                     if tf_parts:
-                        summary += f"⏱️ TF Dağılımı: {' | '.join(tf_parts)}\n"
+                        summary += f"⏱️ TF: {' | '.join(tf_parts)}\n"
                 
                 for setup in pending_setups[:10]:  # Max 10 göster
                     setup_id = setup['id'][:8].upper()
                     pair = setup['pair']
                     setup_type = setup['setup_type']
                     status = setup['status']
-                    tf = setup.get('timeframe', 'N/A').upper()
+                    tf = setup.get('timeframe', 'N/A').lower()  # v1.4.9.8: küçük harf
                     status_emoji = '🎯' if status == 'TP1' else '⏳'
                     summary += f"\n{status_emoji} #{setup_id} - {pair} ({tf}) - {setup_type} ({status})"
                 
@@ -636,13 +636,24 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
 def handle_score_command(chat_id):
     """
     /score - Performance raporu
-    v1.4.9.6: Timeframe breakdown, detaylı istatistikler
+    v1.4.9.8: Son reset zamanı eklendi
     """
     try:
         _telegram.send("📊 İstatistikler hesaplanıyor...", chat_id=chat_id)
         
         # Aggregate stats
         stats = _tracking.get_aggregate_stats()
+        
+        # v1.4.9.8: Son reset zamanı
+        last_reset = _tracking.get_last_reset_time()
+        if last_reset:
+            try:
+                reset_dt = datetime.fromisoformat(last_reset)
+                reset_text = f"\n🔄 Son Reset: {reset_dt.strftime('%Y-%m-%d %H:%M')}"
+            except:
+                reset_text = f"\n🔄 Son Reset: {last_reset[:16]}"
+        else:
+            reset_text = ""
         
         # Duration formatı
         avg_duration = stats.get('avg_duration_minutes', 0)
@@ -667,12 +678,12 @@ def handle_score_command(chat_id):
                     if total > 0:
                         completed = wins + losses
                         if completed > 0:
-                            tf_text += f"• {tf.upper()}: {total} setup ({wins}W/{losses}L, {win_rate:.0f}%)"
+                            tf_text += f"• {tf}: {total} setup ({wins}W/{losses}L, {win_rate:.0f}%)"
                             if pending > 0:
                                 tf_text += f" +{pending} aktif"
                             tf_text += "\n"
                         elif pending > 0:
-                            tf_text += f"• {tf.upper()}: {pending} aktif setup\n"
+                            tf_text += f"• {tf}: {pending} aktif setup\n"
         
         # v1.4.9.6: Detailed stats
         total_setups = stats['total_setups']
@@ -699,9 +710,9 @@ def handle_score_command(chat_id):
 
 {duration_text}📈 **Best Performer:**
 {stats['best_setup_type']}
-{tf_text}
+{tf_text}{reset_text}
 ---
-⏱️ Last Updated: {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
         _telegram.send(score_message, chat_id=chat_id)

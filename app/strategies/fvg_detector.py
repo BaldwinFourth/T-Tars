@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v1.4.9.3
+T-TARS FVG Detector v1.4.9.5
 ============================
 Fair Value Gap setup detection (LONG + SHORT)
+
+v1.4.9.5:
+- pair parametresi eklendi (log'da coin ismi görünsün)
+- STOP_MULTIPLIER artık 1.0 (calculators'dan)
 
 v1.4.9.3:
 - format_price() kullanılıyor (SHIB/DOGE desteği)
@@ -22,17 +26,28 @@ from app.strategies.calculators import (
 logger = logging.getLogger(__name__)
 
 
-def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
+def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
     """
     Bullish FVG setup tespiti
+    
+    Args:
+        fvg: Fair value gap dict
+        volume: Volume data dict
+        atr: ATR değeri
+        timeframe: Timeframe string
+        current_price: Mevcut fiyat
+        pair: Parite ismi (log için)
     
     Returns:
         dict: Setup bilgileri veya None
     """
     try:
+        # Coin ismi (log için)
+        coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
+        
         # Volume confirmed kontrolü (FVG bulunduğu andaki volume)
         if not fvg.get('volume_confirmed', False):
-            logger.info(f"FVG LONG rejected: volume_confirmed=False")
+            logger.info(f"{coin} FVG LONG rejected: volume_confirmed=False")
             return None
         
         # Entry hesaplama
@@ -55,10 +70,10 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
         reward = abs(tp1_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 FVG LONG R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
+        logger.info(f"📊 {coin} FVG LONG R:R: {rr_ratio:.2f} (entry={format_price(entry_price)}, stop={format_price(stop_price)}, tp1={format_price(tp1_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"FVG LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
+            logger.info(f"{coin} FVG LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
             return None
         
         # Risk hesabı
@@ -88,6 +103,8 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
         
+        logger.info(f"✅ {coin} FVG LONG ACCEPTED: R:R {rr_ratio:.2f}")
+        
         return {
             'type': 'FVG + Volume Spike (LONG)',
             'confidence': 'MEDIUM',
@@ -113,17 +130,28 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price):
         return None
 
 
-def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
+def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
     """
     Bearish FVG setup tespiti
+    
+    Args:
+        fvg: Fair value gap dict
+        volume: Volume data dict
+        atr: ATR değeri
+        timeframe: Timeframe string
+        current_price: Mevcut fiyat
+        pair: Parite ismi (log için)
     
     Returns:
         dict: Setup bilgileri veya None
     """
     try:
+        # Coin ismi (log için)
+        coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
+        
         # Volume confirmed kontrolü (FVG bulunduğu andaki volume)
         if not fvg.get('volume_confirmed', False):
-            logger.info(f"FVG SHORT rejected: volume_confirmed=False")
+            logger.info(f"{coin} FVG SHORT rejected: volume_confirmed=False")
             return None
         
         # Entry hesaplama
@@ -146,10 +174,10 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
         reward = abs(entry_price - tp1_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 FVG SHORT R:R: {rr_ratio:.2f} (entry={format_price(entry_price)})")
+        logger.info(f"📊 {coin} FVG SHORT R:R: {rr_ratio:.2f} (entry={format_price(entry_price)}, stop={format_price(stop_price)}, tp1={format_price(tp1_price)})")
         
         if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"FVG SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
+            logger.info(f"{coin} FVG SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
             return None
         
         # Risk hesabı
@@ -178,6 +206,8 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price):
 • ATR: {format_price(atr)} | Stop: {stop_loss} | TP1: {tp1} | TP2: {tp2}
 • R:R Ratio: 1:{rr_ratio:.1f}
 """
+        
+        logger.info(f"✅ {coin} FVG SHORT ACCEPTED: R:R {rr_ratio:.2f}")
         
         return {
             'type': 'FVG + Volume Spike (SHORT)',

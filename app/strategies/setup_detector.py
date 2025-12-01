@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v1.4.9.1
+T-TARS Setup Detector v1.4.9.5
 ==============================
 Trading setup orchestrator.
 OB, FVG, Volume modüllerini import eder.
+
+v1.4.9.5:
+- pair parametresi OB/FVG detector'lara geçiriliyor (log'da coin ismi görünsün)
 
 v1.4.9.1:
 - Genel volume spike kontrolü kaldırıldı
@@ -52,11 +55,11 @@ def detect_trading_setup(pair, market_data):
         if len(obs) > 0:
             ob = obs[0]
             if bias == 'bullish' and ob['type'] == 'bullish':
-                setup = detect_ob_long(ob, volume, atr, timeframe, current_price)
+                setup = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
                 if setup:
                     return setup
             elif bias == 'bearish' and ob['type'] == 'bearish':
-                setup = detect_ob_short(ob, volume, atr, timeframe, current_price)
+                setup = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
                 if setup:
                     return setup
         
@@ -64,11 +67,11 @@ def detect_trading_setup(pair, market_data):
         if len(fvgs) > 0:
             fvg = fvgs[0]
             if bias == 'bullish' and fvg['type'] == 'bullish':
-                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price)
+                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
                 if setup:
                     return setup
             elif bias == 'bearish' and fvg['type'] == 'bearish':
-                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price)
+                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
                 if setup:
                     return setup
         
@@ -103,12 +106,12 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price):
         if len(obs) > 0:
             ob = obs[0]
             if bias == 'bullish' and ob['type'] == 'bullish':
-                setup = detect_ob_long(ob, volume, atr, timeframe, current_price)
+                setup = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
                 if setup:
                     logger.info(f"✅ {pair} {timeframe.upper()} LONG OB R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
             elif bias == 'bearish' and ob['type'] == 'bearish':
-                setup = detect_ob_short(ob, volume, atr, timeframe, current_price)
+                setup = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
                 if setup:
                     logger.info(f"✅ {pair} {timeframe.upper()} SHORT OB R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
@@ -117,12 +120,12 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price):
         if len(fvgs) > 0:
             fvg = fvgs[0]
             if bias == 'bullish' and fvg['type'] == 'bullish':
-                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price)
+                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
                 if setup:
                     logger.info(f"✅ {pair} {timeframe.upper()} LONG FVG R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)
             elif bias == 'bearish' and fvg['type'] == 'bearish':
-                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price)
+                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
                 if setup:
                     logger.info(f"✅ {pair} {timeframe.upper()} SHORT FVG R:R: {setup['rr_ratio']:.2f}")
                     setups.append(setup)

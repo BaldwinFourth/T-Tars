@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v1.4.9.4
+T-TARS Trading Calculators v1.4.9.5
 ===================================
 Tüm katsayılar ve hesaplama fonksiyonları.
 Fine-tuning için sadece bu dosyayı düzenle.
 
+v1.4.9.5:
+- STOP_MULTIPLIER 1.5 → 1.0 (ATR zaten volatilite ölçüyor, ekstra çarpan gereksiz)
+- R:R hesabı düzeltildi: 3.0/1.0 = 3.0 (eskiden 3.0/1.5 = 2.0)
+
 v1.4.9.4:
-- TP1_MULTIPLIER 2.0 -> 3.0 (R:R = 3.0/1.5 = 2.0)
+- TP1_MULTIPLIER 2.0 -> 3.0
 - format_price() - SHIB/DOGE gibi düşük fiyatlı coinler için dinamik format
 
 Kullanım:
@@ -24,9 +28,9 @@ Kullanım:
 # ============================================
 # ATR MULTIPLIERS - STOP & TP
 # ============================================
-STOP_MULTIPLIER = 1.5      # Stop = OB edge - (ATR × 1.5)
-TP1_MULTIPLIER = 3.0       # TP1 = Entry + (ATR × 3.0) → R:R = 3.0/1.5 = 2.0
-TP2_MULTIPLIER = 4.5       # TP2 = Entry + (ATR × 4.5) → R:R = 4.5/1.5 = 3.0
+STOP_MULTIPLIER = 1.0      # Stop = OB edge - ATR (1x ATR, çarpan yok)
+TP1_MULTIPLIER = 3.0       # TP1 = Entry + (ATR × 3.0) → R:R = 3.0/1.0 = 3.0
+TP2_MULTIPLIER = 4.5       # TP2 = Entry + (ATR × 4.5) → R:R = 4.5/1.0 = 4.5
 
 # ============================================
 # R:R THRESHOLDS

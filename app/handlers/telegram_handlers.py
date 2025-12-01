@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.9.3
+T-TARS Telegram Handlers v1.4.9.5
 =================================
 Telegram bot komut handler'ları.
+
+v1.4.9.5:
+- /help: CHANGELOG parse fonksiyonu geri eklendi (v1.4.9.3'te silinmişti)
 
 v1.4.9.3:
 - /help mesajı: telegram markdown fix
@@ -694,9 +697,20 @@ _Yeni setup'lar /scan ile oluşturulabilir._
 
 
 def handle_help_command(chat_id):
-    """Yardım mesajı"""
-    
-    help_text = f"""
+    """
+    Yardım mesajı - v1.4.9.5: CHANGELOG parse geri eklendi
+    """
+    try:
+        # CHANGELOG'dan version features'ı parse et
+        version_features = ""
+        try:
+            version_features = _storage.parse_version_features(Config.VERSION)
+        except Exception as e:
+            logger.warning(f"Could not parse CHANGELOG: {e}")
+            version_features = ""
+        
+        # Base help text
+        help_text = f"""
 🤖 **T-TARS Trading Bot v{Config.VERSION}**
 
 📊 /plan - BTCUSDT icin tam analiz
@@ -711,4 +725,34 @@ BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
 
 ⏰ Auto-scan her 3 dakikada calisir
 """
-    _telegram.send(help_text, chat_id=chat_id)
+        
+        # CHANGELOG varsa ekle
+        if version_features:
+            help_text += f"""
+---
+📋 **v{Config.VERSION} Degisiklikler:**
+```
+{version_features}
+```
+"""
+        
+        _telegram.send(help_text, chat_id=chat_id)
+        logger.info(f"✅ Help command sent to {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Help command error: {e}")
+        # Fallback - basit help mesajı
+        fallback_help = f"""
+🤖 **T-TARS Trading Bot v{Config.VERSION}**
+
+📊 /plan - BTCUSDT icin tam analiz
+📊 /plan ETHUSDT - Farkli parite
+🔍 /scan - Manuel market taramasi
+📊 /score - Performance raporu
+📡 /status - Bot durum kontrolu
+❓ /help - Bu mesaj
+
+🆕 **Desteklenen Coinler:**
+BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
+"""
+        _telegram.send(fallback_help, chat_id=chat_id)

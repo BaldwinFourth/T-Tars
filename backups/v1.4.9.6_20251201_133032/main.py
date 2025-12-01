@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v1.4.9.6
-===========================
+T-TARS Trading Bot v1.4.6
+=========================
 Main Flask application with routes.
 Handlers moved to app/handlers/telegram_handlers.py
-
-v1.4.9.6:
-- monitor: get_all_pending_setups dict döndürüyor fix
-- Timeframe breakdown desteği
 """
 
 from flask import Flask, request, jsonify
@@ -200,14 +196,11 @@ def test_telegram():
 def monitor_setups():
     """
     Cloud Scheduler tarafından her 5 dakikada tetiklenen otomatik setup monitoring
-    v1.4.9.6: get_all_pending_setups dict döndürüyor
     """
     try:
         logger.info("🔍 Monitor: Checking pending setups...")
         
-        # v1.4.9.6: Dict döndürüyor
-        pending_data = tracking.get_all_pending_setups()
-        pending_setups = pending_data.get('setups', [])
+        pending_setups = tracking.get_all_pending_setups()
         
         if not pending_setups or len(pending_setups) == 0:
             logger.info("ℹ️ No pending setups to monitor")
@@ -344,10 +337,7 @@ def monitor_setups():
 
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
-    """
-    Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz
-    v1.4.9.6: timeframe log_setup'a eklendi
-    """
+    """Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz"""
     try:
         pairs = Config.AUTO_SCAN_PAIRS
         results = []
@@ -372,7 +362,6 @@ def auto_analyze():
                         try:
                             setup_id = tracking.log_setup({
                                 'pair': pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT'),
-                                'timeframe': timeframe,  # v1.4.9.6: timeframe eklendi
                                 'timestamp': f"{market_data['current_date']} {market_data['current_time']}",
                                 'setup_type': setup['type'],
                                 'confidence': setup['confidence'],

@@ -9,8 +9,6 @@
 - /score: Loss rate yuzdesi
 
 ### Fixed
-- main.py: monitor fonksiyonu get_all_pending_setups dict fix
-- main.py: auto_analyze timeframe log_setup'a eklendi
 - STOP_MULTIPLIER: 1.5 → 1.0 (R:R 3.0)
 - /help: CHANGELOG parse (list → string fix)
 - Tracking: Movement dogru hesaplaniyor
@@ -20,7 +18,7 @@
 ### Changed
 - /scan: Setup listesinde TF gosteriliyor
 - tracking_service: get_aggregate_stats timeframe breakdown
-- tracking_service: get_all_pending_setups dict donduruyor
+- tracking_service: get_all_pending_setups timeframe breakdown
 
 ---
 

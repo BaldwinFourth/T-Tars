@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.9.5
+T-TARS Telegram Handlers v1.4.9.6
 =================================
 Telegram bot komut handler'ları.
 
-v1.4.9.5:
-- /help: CHANGELOG parse fonksiyonu geri eklendi (v1.4.9.3'te silinmişti)
+v1.4.9.6:
+- /scan: Timeframe dağılımı gösteriliyor
+- /score: Timeframe analizi, loss_rate, pending_rate
 
-v1.4.9.3:
-- /help mesajı: telegram markdown fix
-- /scan mesajı: coinler alt alta emoji ile
+v1.4.9.5:
+- /help: CHANGELOG parse fonksiyonu geri eklendi
 """
 
 import logging
@@ -513,6 +513,7 @@ def handle_scan_command(chat_id):
                                 'timestamp': f"{market_data['current_date']} {market_data['current_time']}",
                                 'setup_type': setup_type,
                                 'confidence': confidence,
+                                'timeframe': timeframe,  # v1.4.9.5: timeframe eklendi
                                 'entry_zone': entry_zone,
                                 'stop_loss': stop_loss,
                                 'tp1': tp1,
@@ -571,7 +572,9 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
         
         # TARAMA SONUÇLARI + AKTİF SETUP LİSTESİ
         try:
-            pending_setups = _tracking.get_all_pending_setups()
+            pending_data = _tracking.get_all_pending_setups()
+            pending_setups = pending_data.get('setups', [])
+            tf_breakdown = pending_data.get('timeframe_breakdown', {})
             
             summary = "🔍 **TARAMA TAMAMLANDI**\n\n"
             summary += "📊 **Yeni Setup'lar:**\n"
@@ -580,13 +583,25 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
             
             if pending_setups and len(pending_setups) > 0:
                 summary += f"\n\n---\n📊 **AKTİF SETUP'LAR:** {len(pending_setups)} adet\n"
+                
+                # v1.4.9.6: Timeframe breakdown
+                if tf_breakdown:
+                    tf_order = ['4h', '1h', '15m', '5m', '3m', 'N/A']
+                    tf_parts = []
+                    for tf in tf_order:
+                        if tf in tf_breakdown:
+                            tf_parts.append(f"{tf.upper()}: {tf_breakdown[tf]}")
+                    if tf_parts:
+                        summary += f"⏱️ TF Dağılımı: {' | '.join(tf_parts)}\n"
+                
                 for setup in pending_setups[:10]:  # Max 10 göster
                     setup_id = setup['id'][:8].upper()
                     pair = setup['pair']
                     setup_type = setup['setup_type']
                     status = setup['status']
+                    tf = setup.get('timeframe', 'N/A').upper()
                     status_emoji = '🎯' if status == 'TP1' else '⏳'
-                    summary += f"\n{status_emoji} #{setup_id} - {pair} - {setup_type} ({status})"
+                    summary += f"\n{status_emoji} #{setup_id} - {pair} ({tf}) - {setup_type} ({status})"
                 
                 if len(pending_setups) > 10:
                     summary += f"\n... ve {len(pending_setups) - 10} setup daha"
@@ -620,7 +635,8 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
 
 def handle_score_command(chat_id):
     """
-    /score - Performance raporu (v1.4.3: avg duration eklendi)
+    /score - Performance raporu
+    v1.4.9.6: Timeframe breakdown, detaylı istatistikler
     """
     try:
         _telegram.send("📊 İstatistikler hesaplanıyor...", chat_id=chat_id)
@@ -630,18 +646,51 @@ def handle_score_command(chat_id):
         
         # Duration formatı
         avg_duration = stats.get('avg_duration_minutes', 0)
-        if avg_duration > 0:
-            duration_text = f"⏱️ Avg Duration: {avg_duration:.1f} minutes\n"
-        else:
-            duration_text = ""
+        duration_text = f"⏱️ Avg Duration: {avg_duration:.1f} minutes\n" if avg_duration > 0 else ""
+        
+        # v1.4.9.6: Timeframe breakdown text
+        tf_breakdown = stats.get('timeframe_breakdown', {})
+        tf_text = ""
+        if tf_breakdown:
+            tf_text = "\n📊 **Timeframe Analizi:**\n"
+            tf_order = ['4h', '1h', '15m', '5m', '3m', 'N/A']
+            for tf in tf_order:
+                if tf in tf_breakdown:
+                    data = tf_breakdown[tf]
+                    total = data['total']
+                    wins = data['wins']
+                    losses = data['losses']
+                    pending = data['pending']
+                    win_rate = data['win_rate']
+                    
+                    # Sadece veri varsa göster
+                    if total > 0:
+                        completed = wins + losses
+                        if completed > 0:
+                            tf_text += f"• {tf.upper()}: {total} setup ({wins}W/{losses}L, {win_rate:.0f}%)"
+                            if pending > 0:
+                                tf_text += f" +{pending} aktif"
+                            tf_text += "\n"
+                        elif pending > 0:
+                            tf_text += f"• {tf.upper()}: {pending} aktif setup\n"
+        
+        # v1.4.9.6: Detailed stats
+        total_setups = stats['total_setups']
+        winning = stats['winning_trades']
+        losing = stats['losing_trades']
+        pending = stats.get('pending_setups', 0)
+        win_rate = stats['win_rate']
+        loss_rate = stats.get('loss_rate', 0)
+        pending_rate = stats.get('pending_rate', 0)
         
         score_message = f"""
 📊 **T-TARS PERFORMANCE REPORT**
 
 🎯 **Setup İstatistikleri:**
-• Total Setups: {stats['total_setups']}
-• Winning Trades: {stats['winning_trades']} ({stats['win_rate']:.1f}%)
-• Losing Trades: {stats['losing_trades']}
+• Total Setups: {total_setups}
+• Winning Trades: {winning} ({win_rate:.1f}%)
+• Losing Trades: {losing} ({loss_rate:.1f}%)
+• Aktif Setuplar: {pending} ({pending_rate:.1f}%)
 
 💰 **Balance Tracking:**
 • Starting: ${stats['starting_balance']:,.2f}
@@ -650,7 +699,7 @@ def handle_score_command(chat_id):
 
 {duration_text}📈 **Best Performer:**
 {stats['best_setup_type']}
-
+{tf_text}
 ---
 ⏱️ Last Updated: {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
 """
@@ -702,12 +751,12 @@ def handle_help_command(chat_id):
     """
     try:
         # CHANGELOG'dan version features'ı parse et
-        version_features = ""
+        version_features_list = []
         try:
-            version_features = _storage.parse_version_features(Config.VERSION)
+            version_features_list = _storage.parse_version_features(Config.VERSION)
         except Exception as e:
             logger.warning(f"Could not parse CHANGELOG: {e}")
-            version_features = ""
+            version_features_list = []
         
         # Base help text
         help_text = f"""
@@ -726,14 +775,14 @@ BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
 ⏰ Auto-scan her 3 dakikada calisir
 """
         
-        # CHANGELOG varsa ekle
-        if version_features:
+        # CHANGELOG varsa ekle (list'i string'e çevir)
+        if version_features_list and len(version_features_list) > 0:
+            features_text = '\n'.join(version_features_list)
             help_text += f"""
 ---
 📋 **v{Config.VERSION} Degisiklikler:**
-```
-{version_features}
-```
+
+{features_text}
 """
         
         _telegram.send(help_text, chat_id=chat_id)

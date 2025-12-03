@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v1.4.9.8
-===========================
+T-TARS Trading Bot v1.4.10.3
+============================
 Main Flask application with routes.
 
-v1.4.9.8:
-- SETUP DETECTED mesajında setup_id gösteriliyor
-- TP/STOP mesajlarında doğru hedef fiyat (target_price)
-- Timeframe küçük harf (3m, 5m, 15m)
-- Mesaj formatı daha kompakt
+v1.4.10.3:
+- FIX: /analyze sessiz çalışır - SETUP DETECTED mesajı GÖNDERME
+- FIX: Duplicate detection - aynı pair+tf+direction için tekrar setup oluşturma
+- FIX: 404 error handling güçlendirildi
+- /scan hala mesaj gönderir (manuel tetikleme)
 
-v1.4.9.7:
-- SETUP DETECTED mesajı kompakt
-- format_price ile detaylı fiyatlar
+v1.4.10.1:
+- FIX: Robust komut parsing (@BotName ile gelen komutlar için)
 """
 
 from flask import Flask, request, jsonify
@@ -144,24 +143,43 @@ def telegram_webhook():
             logger.warning(f"Unauthorized chat_id: {chat_id} (Allowed: {allowed_chats})")
             return jsonify({"status": "unauthorized"}), 403
         
-        # Komutları işle
-        if text.startswith('/plan'):
+        # ============================================
+        # KOMUT PARSING - v1.4.10.1
+        # Grup chatlerinde: /score@T_Tars_Executer_Bot
+        # Bu yüzden @bot_username kısmını temizliyoruz
+        # ============================================
+        
+        # Komutu parse et: "/score@BotName arg1" → "/score"
+        command = text.split()[0].split('@')[0].lower()
+        
+        logger.info(f"🎯 Parsed command: '{command}' (original: '{text[:50]}')")
+        
+        if command == '/plan':
+            logger.info(f"➡️ Routing to handle_plan_command")
             handle_plan_command(text, chat_id)
-        elif text.startswith('/execute'):
+        elif command == '/execute':
+            logger.info(f"➡️ Routing to handle_execute_command")
             handle_execute_command(text, chat_id)
-        elif text.startswith('/log'):
+        elif command == '/log':
+            logger.info(f"➡️ Routing to handle_log_command")
             handle_log_command(text, chat_id)
-        elif text.startswith('/status'):
+        elif command == '/status':
+            logger.info(f"➡️ Routing to handle_status_command")
             handle_status_command(chat_id)
-        elif text.startswith('/scan'):
+        elif command == '/scan':
+            logger.info(f"➡️ Routing to handle_scan_command")
             handle_scan_command(chat_id)
-        elif text.startswith('/score'):
-            handle_score_command(chat_id)
-        elif text.startswith('/reset_score'):
+        elif command == '/reset_score':
+            logger.info(f"➡️ Routing to handle_reset_score_command")
             handle_reset_score_command(chat_id)
-        elif text.startswith('/help'):
+        elif command == '/score':
+            logger.info(f"➡️ Routing to handle_score_command")
+            handle_score_command(chat_id)
+        elif command == '/help':
+            logger.info(f"➡️ Routing to handle_help_command")
             handle_help_command(chat_id)
         else:
+            logger.warning(f"⚠️ Unknown command: '{command}'")
             telegram.send("❌ Bilinmeyen komut. `/help` yazın.", chat_id=chat_id)
         
         return jsonify({"status": "success"})
@@ -226,12 +244,10 @@ def test_telegram():
 def monitor_setups():
     """
     Cloud Scheduler tarafından her 5 dakikada tetiklenen otomatik setup monitoring
-    v1.4.9.6: get_all_pending_setups dict döndürüyor
     """
     try:
         logger.info("🔍 Monitor: Checking pending setups...")
         
-        # v1.4.9.6: Dict döndürüyor
         pending_data = tracking.get_all_pending_setups()
         pending_setups = pending_data.get('setups', [])
         
@@ -277,14 +293,13 @@ def monitor_setups():
                     
                     stats = tracking.get_aggregate_stats()
                     
-                    # Timeframe from setup
                     timeframe = setup_data.get('timeframe', setup.get('timeframe', 'N/A'))
                     entry_price = setup_data.get('entry_price', setup.get('current_price', 0))
                     stop_price = setup_data.get('stop_price', 0)
                     tp1_price = setup_data.get('tp1_price', 0)
                     tp2_price = setup_data.get('tp2_price', 0)
                     
-                    # v1.4.9.8: Doğru hedef fiyatı belirle
+                    # Doğru hedef fiyatı belirle
                     if new_status == 'TP1':
                         target_price = tp1_price
                     elif new_status == 'COMPLETED':
@@ -294,7 +309,7 @@ def monitor_setups():
                     else:
                         target_price = current_price
                     
-                    # Emoji mapping (v1.4.8)
+                    # Emoji mapping
                     if new_status == 'TP1':
                         emoji = '🎯'
                         header_emoji = '💰💰💰'
@@ -320,10 +335,7 @@ def monitor_setups():
                         status_emoji = 'ℹ️'
                         next_action = ''
                     
-                    # Duration text
                     duration_text = f"⏱️ {duration:.1f}m\n" if duration > 0 else ""
-                    
-                    # Movement text (format_price ile)
                     movement_text = f"📊 Move: {format_price(movement)}\n" if movement > 0 else ""
                     
                     broadcast_message = f"""
@@ -381,12 +393,16 @@ def monitor_setups():
 def auto_analyze():
     """
     Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz
-    v1.4.9.6: timeframe log_setup'a eklendi
+    v1.4.10.3: 
+    - Duplicate detection
+    - SETUP DETECTED mesajı GÖNDERİLMEZ (sessiz çalışır)
+    - Sadece tracking'e kaydeder
     """
     try:
         pairs = Config.AUTO_SCAN_PAIRS
         results = []
         total_setups = 0
+        skipped_duplicates = 0
         
         for pair in pairs:
             try:
@@ -394,20 +410,20 @@ def auto_analyze():
                 setups = detect_all_trading_setups(pair, market_data)
                 
                 if setups:
-                    # HER SETUP İÇİN AYRI MESAJ
                     for setup in setups:
                         entry_zone = setup.get('entry_zone', 'N/A')
                         stop_loss = setup.get('stop_loss', 'N/A')
                         tp1 = setup.get('tp1', 'N/A')
                         tp2 = setup.get('tp2', 'N/A')
-                        detailed_explanation = setup.get('detailed_explanation', setup.get('details', ''))
                         timeframe = setup.get('timeframe', '5m')
                         
-                        # TRACKING KAYDI EKLE
+                        entry_price = setup.get('entry_price', setup.get('current_price', market_data['current_price']))
+                        
+                        # TRACKING KAYDI (sessiz - mesaj yok)
                         try:
                             setup_id = tracking.log_setup({
                                 'pair': pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT'),
-                                'timeframe': timeframe,  # v1.4.9.6: timeframe eklendi
+                                'timeframe': timeframe,
                                 'timestamp': f"{market_data['current_date']} {market_data['current_time']}",
                                 'setup_type': setup['type'],
                                 'confidence': setup['confidence'],
@@ -415,7 +431,8 @@ def auto_analyze():
                                 'stop_loss': stop_loss,
                                 'tp1': tp1,
                                 'tp2': tp2,
-                                'current_price': setup.get('current_price', market_data['current_price']),
+                                'current_price': market_data['current_price'],
+                                'entry_price': entry_price,
                                 'stop_price': setup.get('stop_price', 0),
                                 'tp1_price': setup.get('tp1_price', 0),
                                 'tp2_price': setup.get('tp2_price', 0),
@@ -425,31 +442,18 @@ def auto_analyze():
                                 'balance_before': 1000.00,
                                 'risk_percent': 2.0
                             })
-                            logger.info(f"✅ Setup #{setup_id} logged and tracked")
+                            
+                            # v1.4.10.3: Duplicate ise None döner
+                            if setup_id is None:
+                                skipped_duplicates += 1
+                                continue
+                            
+                            # v1.4.10.3: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
+                            logger.info(f"✅ Setup #{setup_id} logged (entry: {format_price(entry_price)}) [silent]")
+                            total_setups += 1
+                            
                         except Exception as track_error:
                             logger.error(f"❌ Tracking failed: {track_error}")
-                            setup_id = "N/A"
-                        
-                        # v1.4.9.8: setup_id eklendi, timeframe küçük harf
-                        message = f"""🚨 **SETUP #{setup_id.upper()} DETECTED!**
-
-📊 Parite: {pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')}
-🎯 Setup: {setup['type']}
-⏱️ TF: {timeframe.lower()}
-{"🔴 SHORT" if 'SHORT' in setup['type'] else "🟢 LONG"}
-⚡ {setup['confidence']}
-
-💰 Fiyat: {format_price(market_data['current_price'])}
-🎯 Entry: {entry_zone}
-🛡️ Stop: {stop_loss}
-🎁 TP1: {tp1}
-🎁 TP2: {tp2}
-📊 R:R: 1:{setup.get('rr_ratio', 0):.1f}
-
-⏰ {market_data['current_time']}
-"""
-                        telegram.send_signal(message)
-                        total_setups += 1
                     
                     results.append(f"{pair}: {len(setups)} setup(s) found")
                 else:
@@ -458,8 +462,8 @@ def auto_analyze():
                 logger.error(f"Error analyzing {pair}: {e}")
                 results.append(f"{pair}: Error")
         
-        logger.info(f"✅ Auto analyze completed: {total_setups} total setups found")
-        return jsonify({"status": "success", "timestamp": get_turkey_time().isoformat(), "results": results, "total_setups": total_setups})
+        logger.info(f"✅ Auto analyze completed: {total_setups} new setups, {skipped_duplicates} duplicates skipped [silent mode]")
+        return jsonify({"status": "success", "timestamp": get_turkey_time().isoformat(), "results": results, "total_setups": total_setups, "skipped_duplicates": skipped_duplicates})
     except Exception as e:
         logger.error(f"Auto analyze error: {e}")
         return jsonify({"error": str(e)}), 500

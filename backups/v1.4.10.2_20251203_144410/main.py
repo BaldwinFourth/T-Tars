@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v1.4.10.3
+T-TARS Trading Bot v1.4.10.2
 ============================
 Main Flask application with routes.
 
-v1.4.10.3:
+v1.4.10.2:
 - FIX: /analyze sessiz çalışır - SETUP DETECTED mesajı GÖNDERME
 - FIX: Duplicate detection - aynı pair+tf+direction için tekrar setup oluşturma
 - FIX: 404 error handling güçlendirildi
@@ -393,7 +393,7 @@ def monitor_setups():
 def auto_analyze():
     """
     Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz
-    v1.4.10.3: 
+    v1.4.10.2: 
     - Duplicate detection
     - SETUP DETECTED mesajı GÖNDERİLMEZ (sessiz çalışır)
     - Sadece tracking'e kaydeder
@@ -443,12 +443,12 @@ def auto_analyze():
                                 'risk_percent': 2.0
                             })
                             
-                            # v1.4.10.3: Duplicate ise None döner
+                            # v1.4.10.2: Duplicate ise None döner
                             if setup_id is None:
                                 skipped_duplicates += 1
                                 continue
                             
-                            # v1.4.10.3: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
+                            # v1.4.10.2: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
                             logger.info(f"✅ Setup #{setup_id} logged (entry: {format_price(entry_price)}) [silent]")
                             total_setups += 1
                             

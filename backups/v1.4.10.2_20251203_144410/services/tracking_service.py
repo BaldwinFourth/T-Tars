@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v1.4.9.8
+T-TARS Tracking Service v1.4.10.2
 ================================
 Setup Tracking & Performance Analytics Service
 
-v1.4.9.8:
-- reset_all_tracking: timestamp kaydediyor
-- get_last_reset_time: son reset zamanını getiriyor
+v1.4.10.2:
+- DUPLICATE DETECTION: Aynı pair+timeframe+direction için tekrar setup oluşturmaz
+- 404 error handling güçlendirildi
+- get_all_pending_setups: Silinmiş dosyaları skip eder
 
-v1.4.9.6:
-- Timeframe breakdown (aktif + total)
-- Detaylı istatistikler (loss_rate, pending_rate)
-- get_all_pending_setups dict döndürüyor
+v1.4.9.9:
+- entry_price ayrı kaydediliyor (current_price != entry_price)
+- check_setup_status: entry_price kullanıyor (LONG/SHORT fix)
 """
 
 from google.cloud import storage
@@ -29,8 +29,6 @@ TURKEY_TZ = timezone(timedelta(hours=3))
 def format_price(price):
     """
     Fiyatı dinamik formatta string'e çevir.
-    SHIB/DOGE gibi düşük fiyatlı coinler için 8 ondalık,
-    BTC gibi yüksek fiyatlılar için 2 ondalık kullanır.
     """
     if price is None or price == 0:
         return "$0.00"
@@ -58,36 +56,82 @@ class TrackingService:
         self.bucket = self.client.bucket(bucket_name)
         logger.info(f"✅ Tracking Service initialized: {bucket_name}")
     
+    def check_duplicate_setup(self, pair, timeframe, direction):
+        """
+        v1.4.10.2: Duplicate detection
+        Aynı pair + timeframe + direction için PENDING/TP1 setup var mı kontrol et
+        
+        Args:
+            pair: 'BTCUSDT'
+            timeframe: '5m', '15m', etc.
+            direction: 'LONG' veya 'SHORT'
+        
+        Returns:
+            str or None: Mevcut setup_id varsa döndür, yoksa None
+        """
+        try:
+            blobs = self.bucket.list_blobs(prefix='setups/')
+            
+            for blob in blobs:
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
+                    setup = json.loads(blob.download_as_string())
+                    
+                    # Sadece aktif setup'lara bak
+                    if setup['status'] not in ['PENDING', 'TP1']:
+                        continue
+                    
+                    # Pair eşleşmesi
+                    if setup['pair'] != pair:
+                        continue
+                    
+                    # Timeframe eşleşmesi
+                    if setup.get('timeframe', 'N/A') != timeframe:
+                        continue
+                    
+                    # Direction eşleşmesi (LONG/SHORT)
+                    setup_direction = 'LONG' if 'LONG' in setup['setup_type'] else 'SHORT'
+                    if setup_direction != direction:
+                        continue
+                    
+                    # Duplicate bulundu!
+                    logger.info(f"⚠️ Duplicate detected: {pair} {timeframe} {direction} → existing #{setup['setup_id']}")
+                    return setup['setup_id']
+                    
+                except Exception as e:
+                    # Dosya okunamadı, skip et
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Duplicate check error: {e}")
+            return None
+    
     def log_setup(self, setup_data):
         """
         Setup detected olduğunda kaydet
         
-        Args:
-            setup_data: {
-                'pair': 'BTCUSDT',
-                'timestamp': '2025-11-20 14:30:00',
-                'setup_type': 'OB + Volume Spike (LONG)',
-                'confidence': 'HIGH',
-                'entry_zone': '$95,234 - $95,456',
-                'stop_loss': '$94,500',
-                'tp1': '$96,000',
-                'tp2': '$96,500',
-                'current_price': 95234.50,
-                'stop_price': 94500.00,
-                'tp1_price': 96000.00,
-                'tp2_price': 96500.00,
-                'volume_spike_ratio': 2.5,
-                'ob_strength': 'high',
-                'rr_ratio': 2.3,
-                'balance_before': 1000.00,
-                'risk_percent': 2.0,
-                'timeframe': '5m'  # v1.4.9.5: timeframe eklendi
-            }
+        v1.4.10.2: Duplicate detection - aynı pair+tf+direction için PENDING varsa skip
+        v1.4.9.9: entry_price ayrı kaydediliyor
         
         Returns:
-            str: Setup UUID
+            str: Setup UUID (yeni veya mevcut)
         """
         try:
+            pair = setup_data['pair']
+            timeframe = setup_data.get('timeframe', 'N/A')
+            setup_type = setup_data['setup_type']
+            direction = 'LONG' if 'LONG' in setup_type else 'SHORT'
+            
+            # v1.4.10.2: DUPLICATE CHECK
+            existing_id = self.check_duplicate_setup(pair, timeframe, direction)
+            if existing_id:
+                logger.info(f"⏭️ Skipping duplicate: {pair} {timeframe} {direction} (existing: #{existing_id})")
+                return None  # None döndür, mesaj gönderilmesin
+            
             # Generate UUID
             setup_id = str(uuid.uuid4())[:8]
             
@@ -96,19 +140,23 @@ class TrackingService:
             risk_percent = setup_data.get('risk_percent', 2.0)
             risk_dollars = balance * (risk_percent / 100)
             
+            # v1.4.9.9: entry_price yoksa current_price kullan (backward compat)
+            entry_price = setup_data.get('entry_price', setup_data.get('current_price', 0))
+            
             # Prepare setup record
             setup_record = {
                 'setup_id': setup_id,
-                'pair': setup_data['pair'],
+                'pair': pair,
                 'timestamp': setup_data['timestamp'],
-                'setup_type': setup_data['setup_type'],
+                'setup_type': setup_type,
                 'confidence': setup_data['confidence'],
-                'timeframe': setup_data.get('timeframe', 'N/A'),  # v1.4.9.5
+                'timeframe': timeframe,
                 'entry_zone': setup_data['entry_zone'],
                 'stop_loss': setup_data['stop_loss'],
                 'tp1': setup_data['tp1'],
                 'tp2': setup_data['tp2'],
                 'current_price': setup_data['current_price'],
+                'entry_price': entry_price,
                 'stop_price': setup_data['stop_price'],
                 'tp1_price': setup_data['tp1_price'],
                 'tp2_price': setup_data['tp2_price'],
@@ -137,7 +185,7 @@ class TrackingService:
                 content_type='application/json'
             )
             
-            logger.info(f"✅ Setup logged: {setup_id} ({setup_data['pair']}) TF:{setup_record['timeframe']}")
+            logger.info(f"✅ Setup logged: {setup_id} ({pair}) TF:{timeframe} Entry:{format_price(entry_price)}")
             return setup_id
             
         except Exception as e:
@@ -148,36 +196,40 @@ class TrackingService:
         """
         Bir setup'ın durumunu check et (TP/Stop hit kontrolü)
         
+        v1.4.10.2: 404 error handling güçlendirildi
+        v1.4.9.9: entry_price kullanılıyor
+        
         Returns:
-            dict: {
-                'status_changed': bool,
-                'old_status': str,
-                'new_status': str,
-                'message': str
-            }
+            dict: status_changed, old_status, new_status, message
         """
         try:
             # Setup'ı oku
             blob = self.bucket.blob(f'setups/{setup_id}.json')
+            
+            # v1.4.10.2: Dosya var mı kontrol et
+            if not blob.exists():
+                logger.warning(f"⚠️ Setup not found: {setup_id}")
+                return {'status_changed': False, 'old_status': None, 'new_status': None, 'not_found': True}
+            
             setup = json.loads(blob.download_as_string())
             
             old_status = setup['status']
             new_status = old_status
             message = ""
             
-            # COMPLETED olan setup'ları skip et
+            # COMPLETED veya STOPPED olan setup'ları skip et
             if setup['status'] in ['COMPLETED', 'STOPPED']:
                 return {'status_changed': False, 'old_status': old_status, 'new_status': new_status}
             
             pair = setup['pair']
             setup_type = setup['setup_type']
-            timeframe = setup.get('timeframe', 'N/A')  # v1.4.9.5
+            timeframe = setup.get('timeframe', 'N/A')
             
             # LONG veya SHORT?
             is_long = 'LONG' in setup_type
             
-            # Get values
-            entry = setup['current_price']
+            # v1.4.9.9: entry_price kullan
+            entry = setup.get('entry_price', setup['current_price'])
             stop = setup['stop_price']
             tp1 = setup['tp1_price']
             tp2 = setup['tp2_price']
@@ -185,7 +237,7 @@ class TrackingService:
             risk_dollars = setup.get('risk_dollars', balance_before * 0.02)
             rr_ratio = setup.get('rr_ratio', 2.0)
             
-            # v1.4.9.5: Format prices for display
+            # Format prices for display
             entry_fmt = format_price(entry)
             stop_fmt = format_price(stop)
             tp1_fmt = format_price(tp1)
@@ -198,38 +250,27 @@ class TrackingService:
                 if is_long and current_price >= tp1:
                     new_status = 'TP1'
                     setup['tp1_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = 0.0
-                    setup['balance_after'] = balance_before
+                    # v1.4.10.2: TP1'de partial profit (%50 pozisyon kapatıldı)
+                    # 1R kar (risk_dollars kadar) - yarı pozisyondan
+                    partial_profit = risk_dollars * 1.0  # 1R kar
+                    setup['profit_loss'] = partial_profit
+                    setup['balance_after'] = balance_before + partial_profit
+                    setup['result'] = 'PARTIAL_WIN'  # v1.4.10.2: Partial win
                     movement = abs(tp1 - entry)
                     setup['movement_captured_dollars'] = movement
-                    message = f"""🎯 SETUP #{setup_id.upper()} → TP1 HIT! 💰💰💰
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-✅ Entry: {entry_fmt} → TP1: {tp1_fmt}
-💰 Profit: +0.00% ($0.00)
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-📊 Status: Breakeven, TP2 bekliyor"""
+                    message = f"TP1_HIT"
 
                 elif not is_long and current_price <= tp1:
                     new_status = 'TP1'
                     setup['tp1_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = 0.0
-                    setup['balance_after'] = balance_before
+                    # v1.4.10.2: TP1'de partial profit
+                    partial_profit = risk_dollars * 1.0
+                    setup['profit_loss'] = partial_profit
+                    setup['balance_after'] = balance_before + partial_profit
+                    setup['result'] = 'PARTIAL_WIN'
                     movement = abs(entry - tp1)
                     setup['movement_captured_dollars'] = movement
-                    message = f"""🎯 SETUP #{setup_id.upper()} → TP1 HIT! 💰💰💰
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-✅ Entry: {entry_fmt} → TP1: {tp1_fmt}
-💰 Profit: +0.00% ($0.00)
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-📊 Status: Breakeven, TP2 bekliyor"""
+                    message = f"TP1_HIT"
                 
                 # Check Stop
                 elif is_long and current_price <= stop:
@@ -241,17 +282,7 @@ class TrackingService:
                     setup['balance_after'] = balance_before - loss
                     movement = abs(entry - stop)
                     setup['movement_captured_dollars'] = movement
-                    loss_percent = (loss / balance_before * 100)
-                    message = f"""⛔ SETUP #{setup_id.upper()} → STOP HIT ❌
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-❌ Entry: {entry_fmt} → STOPPED: {stop_fmt}
-💰 Profit: -{loss_percent:.2f}% (${-loss:.2f})
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-❌ Setup kapatıldı"""
+                    message = f"STOP_HIT"
 
                 elif not is_long and current_price >= stop:
                     new_status = 'STOPPED'
@@ -262,17 +293,7 @@ class TrackingService:
                     setup['balance_after'] = balance_before - loss
                     movement = abs(stop - entry)
                     setup['movement_captured_dollars'] = movement
-                    loss_percent = (loss / balance_before * 100)
-                    message = f"""⛔ SETUP #{setup_id.upper()} → STOP HIT ❌
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-❌ Entry: {entry_fmt} → STOPPED: {stop_fmt}
-💰 Profit: -{loss_percent:.2f}% (${-loss:.2f})
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-❌ Setup kapatıldı"""
+                    message = f"STOP_HIT"
             
             elif setup['status'] == 'TP1':
                 # Check TP2
@@ -280,45 +301,32 @@ class TrackingService:
                     new_status = 'COMPLETED'
                     setup['result'] = 'WIN'
                     setup['tp2_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    profit = risk_dollars * rr_ratio
+                    # v1.4.10.2: Full profit = TP1 profit + TP2 profit
+                    # TP1'de 1R kazandık, TP2'de kalan %50'den (rr_ratio - 1)R daha
+                    tp1_profit = risk_dollars * 1.0
+                    tp2_additional = risk_dollars * (rr_ratio - 1.0) * 0.5  # Kalan yarı pozisyon
+                    profit = tp1_profit + tp2_additional
                     setup['profit_loss'] = profit
                     setup['balance_after'] = balance_before + profit
                     movement = abs(tp2 - entry)
                     setup['movement_captured_dollars'] = movement
-                    profit_percent = (profit / balance_before * 100)
-                    message = f"""🎉 SETUP #{setup_id.upper()} → TP2 HIT! 🚀🚀🚀
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-✅ Entry: {entry_fmt} → TP2: {tp2_fmt}
-💰 Profit: +{profit_percent:.2f}% (+${profit:.2f})
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-✅ Setup COMPLETED - WIN!"""
+                    message = f"TP2_HIT"
 
                 elif not is_long and current_price <= tp2:
                     new_status = 'COMPLETED'
                     setup['result'] = 'WIN'
                     setup['tp2_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    profit = risk_dollars * rr_ratio
+                    # v1.4.10.2: Full profit
+                    tp1_profit = risk_dollars * 1.0
+                    tp2_additional = risk_dollars * (rr_ratio - 1.0) * 0.5
+                    profit = tp1_profit + tp2_additional
                     setup['profit_loss'] = profit
                     setup['balance_after'] = balance_before + profit
                     movement = abs(entry - tp2)
                     setup['movement_captured_dollars'] = movement
-                    profit_percent = (profit / balance_before * 100)
-                    message = f"""🎉 SETUP #{setup_id.upper()} → TP2 HIT! 🚀🚀🚀
+                    message = f"TP2_HIT"
 
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-✅ Entry: {entry_fmt} → TP2: {tp2_fmt}
-💰 Profit: +{profit_percent:.2f}% (+${profit:.2f})
-📊 Movement: {format_price(movement)}
-⏱️ Duration: {{duration}} minutes
-✅ Setup COMPLETED - WIN!"""
-
-                # Check Stop (after TP1 = breakeven)
+                # Check Stop after TP1 = breakeven
                 elif is_long and current_price <= entry:
                     new_status = 'COMPLETED'
                     setup['result'] = 'BREAKEVEN'
@@ -327,16 +335,7 @@ class TrackingService:
                     setup['balance_after'] = balance_before
                     movement = abs(tp1 - entry)
                     setup['movement_captured_dollars'] = movement
-                    message = f"""📊 SETUP #{setup_id.upper()} → BREAKEVEN
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-📊 Entry: {entry_fmt} → BE: {entry_fmt}
-💰 Profit: 0.00% ($0.00)
-📊 Movement: {format_price(movement)} (TP1'e kadar)
-⏱️ Duration: {{duration}} minutes
-📊 Setup COMPLETED - Breakeven"""
+                    message = f"BREAKEVEN"
 
                 elif not is_long and current_price >= entry:
                     new_status = 'COMPLETED'
@@ -346,16 +345,7 @@ class TrackingService:
                     setup['balance_after'] = balance_before
                     movement = abs(entry - tp1)
                     setup['movement_captured_dollars'] = movement
-                    message = f"""📊 SETUP #{setup_id.upper()} → BREAKEVEN
-
-📊 Parite: {pair}
-🎯 Setup Type: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-📊 Entry: {entry_fmt} → BE: {entry_fmt}
-💰 Profit: 0.00% ($0.00)
-📊 Movement: {format_price(movement)} (TP1'e kadar)
-⏱️ Duration: {{duration}} minutes
-📊 Setup COMPLETED - Breakeven"""
+                    message = f"BREAKEVEN"
             
             # Calculate duration and update if status changed
             if new_status != old_status:
@@ -363,9 +353,6 @@ class TrackingService:
                 now = datetime.now(TURKEY_TZ)
                 duration = (now - created_at).total_seconds() / 60
                 setup['duration_minutes'] = round(duration, 1)
-                
-                # Replace duration placeholder in message
-                message = message.replace('{duration}', f"{duration:.1f}")
                 
                 setup['status'] = new_status
                 blob.upload_from_string(
@@ -390,16 +377,21 @@ class TrackingService:
     def get_all_pending_setups(self):
         """
         Tüm PENDING ve TP1 durumundaki setup'ları getir
-        v1.4.9.6: timeframe_breakdown eklendi
+        v1.4.10.2: 404 error handling - silinmiş dosyaları skip et
         """
         try:
             blobs = self.bucket.list_blobs(prefix='setups/')
             pending_setups = []
-            timeframe_counts = {}  # v1.4.9.6
+            timeframe_counts = {}
+            skipped_count = 0
             
             for blob in blobs:
-                if blob.name.endswith('.json'):
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
                     setup = json.loads(blob.download_as_string())
+                    
                     if setup['status'] in ['PENDING', 'TP1']:
                         tf = setup.get('timeframe', 'N/A')
                         pending_setups.append({
@@ -409,16 +401,24 @@ class TrackingService:
                             'setup_type': setup['setup_type'],
                             'timeframe': tf,
                             'current_price': setup['current_price'],
+                            'entry_price': setup.get('entry_price', setup['current_price']),
                             'tp1_price': setup['tp1_price'],
                             'tp2_price': setup['tp2_price'],
                             'stop_price': setup['stop_price'],
                             'status': setup['status']
                         })
                         
-                        # v1.4.9.6: Count by timeframe
                         if tf not in timeframe_counts:
                             timeframe_counts[tf] = 0
                         timeframe_counts[tf] += 1
+                        
+                except Exception as e:
+                    # v1.4.10.2: Dosya okunamadı, skip et (404 veya corrupt)
+                    skipped_count += 1
+                    continue
+            
+            if skipped_count > 0:
+                logger.warning(f"⚠️ Skipped {skipped_count} unreadable setup files")
             
             logger.info(f"📊 Pending setups: {len(pending_setups)} | TF breakdown: {timeframe_counts}")
             return {
@@ -434,7 +434,7 @@ class TrackingService:
     def get_aggregate_stats(self):
         """
         /score komutu için aggregate istatistikler
-        v1.4.9.6: Timeframe breakdown eklendi
+        v1.4.10.2: 404 error handling
         """
         try:
             blobs = self.bucket.list_blobs(prefix='setups/')
@@ -443,22 +443,26 @@ class TrackingService:
             winning_trades = 0
             losing_trades = 0
             breakeven_trades = 0
-            pending_setups = 0  # v1.4.9.6
+            pending_setups = 0
             starting_balance = 1000.00
             current_balance = 1000.00
             setup_type_stats = {}
             total_duration = 0
             completed_trades = 0
+            skipped_count = 0
             
-            # v1.4.9.6: Timeframe stats
-            timeframe_stats = {}  # {'5m': {'total': 10, 'wins': 5, 'losses': 3, 'pending': 2}}
+            # Timeframe stats
+            timeframe_stats = {}
             
             for blob in blobs:
-                if blob.name.endswith('.json'):
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
                     setup = json.loads(blob.download_as_string())
                     total_setups += 1
                     
-                    # v1.4.9.6: Timeframe tracking
+                    # Timeframe tracking
                     tf = setup.get('timeframe', 'N/A')
                     if tf not in timeframe_stats:
                         timeframe_stats[tf] = {'total': 0, 'wins': 0, 'losses': 0, 'pending': 0, 'breakeven': 0}
@@ -498,6 +502,14 @@ class TrackingService:
                     elif setup['status'] in ['PENDING', 'TP1']:
                         pending_setups += 1
                         timeframe_stats[tf]['pending'] += 1
+                        
+                except Exception as e:
+                    # v1.4.10.2: Dosya okunamadı, skip et
+                    skipped_count += 1
+                    continue
+            
+            if skipped_count > 0:
+                logger.warning(f"⚠️ Skipped {skipped_count} unreadable setup files in aggregate stats")
             
             # Calculate win rate (only WIN/LOSS, not breakeven/pending)
             completed_count = winning_trades + losing_trades
@@ -522,7 +534,7 @@ class TrackingService:
                         best_win_rate = type_win_rate
                         best_setup_type = f"{setup_type}: {type_win_rate:.0f}% win rate"
             
-            # v1.4.9.6: Calculate timeframe win rates
+            # Calculate timeframe win rates
             timeframe_breakdown = {}
             for tf, stats in timeframe_stats.items():
                 tf_completed = stats['wins'] + stats['losses']
@@ -541,17 +553,17 @@ class TrackingService:
                 'winning_trades': winning_trades,
                 'losing_trades': losing_trades,
                 'breakeven_trades': breakeven_trades,
-                'pending_setups': pending_setups,  # v1.4.9.6
+                'pending_setups': pending_setups,
                 'win_rate': win_rate,
-                'loss_rate': loss_rate,  # v1.4.9.6
-                'pending_rate': pending_rate,  # v1.4.9.6
+                'loss_rate': loss_rate,
+                'pending_rate': pending_rate,
                 'starting_balance': starting_balance,
                 'current_balance': current_balance,
                 'profit': profit,
                 'profit_percent': profit_percent,
                 'best_setup_type': best_setup_type,
                 'avg_duration_minutes': round(avg_duration, 1),
-                'timeframe_breakdown': timeframe_breakdown  # v1.4.9.6
+                'timeframe_breakdown': timeframe_breakdown
             }
             
             logger.info(f"📊 Aggregate stats: {winning_trades}W/{losing_trades}L/{breakeven_trades}BE/{pending_setups}P ({win_rate:.1f}%)")
@@ -591,7 +603,7 @@ class TrackingService:
                     blob.delete()
                     deleted_count += 1
             
-            # v1.4.9.8: Reset timestamp kaydet
+            # Reset timestamp kaydet
             reset_time = datetime.now(TURKEY_TZ).isoformat()
             meta_blob = self.bucket.blob('meta/last_reset.json')
             meta_blob.upload_from_string(
@@ -609,7 +621,6 @@ class TrackingService:
     def get_last_reset_time(self):
         """
         Son reset zamanını getir
-        v1.4.9.8
         """
         try:
             meta_blob = self.bucket.blob('meta/last_reset.json')

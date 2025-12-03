@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.9.6
-=================================
+T-TARS Telegram Handlers v1.4.10.2
+==================================
 Telegram bot komut handler'ları.
 
-v1.4.9.6:
-- /scan: Timeframe dağılımı gösteriliyor
-- /score: Timeframe analizi, loss_rate, pending_rate
+v1.4.10.2:
+- FIX: Duplicate detection - /scan'de aynı setup tekrar oluşturulmaz
+- Duplicate ise mesaj gönderilmez
 
-v1.4.9.5:
-- /help: CHANGELOG parse fonksiyonu geri eklendi
+v1.4.10.0:
+- SETUP DETECTED mesajı KISA format (detaylar ve AI düşünceler kaldırıldı)
+- entry_price log_setup'a eklendi
 """
 
 import logging
@@ -26,6 +27,28 @@ TURKEY_TZ = timezone(timedelta(hours=3))
 def get_turkey_time():
     """Get current time in Turkey timezone"""
     return datetime.now(TURKEY_TZ)
+
+
+def format_price(price):
+    """
+    Fiyatı dinamik formatta string'e çevir.
+    """
+    if price is None or price == 0:
+        return "$0.00"
+    
+    abs_price = abs(float(price))
+    
+    if abs_price < 0.0001:
+        return f"${price:.8f}"
+    elif abs_price < 0.01:
+        return f"${price:.6f}"
+    elif abs_price < 1:
+        return f"${price:.4f}"
+    elif abs_price < 100:
+        return f"${price:.4f}"
+    else:
+        return f"${price:,.2f}"
+
 
 # Service instances (set by init_handlers)
 _telegram = None
@@ -478,16 +501,17 @@ Komutlar için: /help
 
 def handle_scan_command(chat_id):
     """
-    /scan - Manuel market taraması (v1.4.9.2: coin listesi alt alta)
+    /scan - Manuel market taraması
+    v1.4.10.2: Duplicate detection - aynı setup tekrar oluşturulmaz
     """
     try:
-        # v1.4.9.2: Coinleri alt alta emoji ile listele
         coin_list = '\n'.join([f"🧪 {p.split('/')[0]}" for p in Config.AUTO_SCAN_PAIRS])
         _telegram.send(f"🔍 **Market taraması başlatılıyor...**\n\n{coin_list}\n\n⏳ Tüm timeframe'lerde analiz ediliyor...", chat_id=chat_id)
         
         pairs = Config.AUTO_SCAN_PAIRS
         results = []
         total_new_setups = 0
+        skipped_duplicates = 0
         
         for pair in pairs:
             try:
@@ -495,7 +519,6 @@ def handle_scan_command(chat_id):
                 setups = detect_all_trading_setups(pair, market_data)
                 
                 if setups:
-                    # HER SETUP İÇİN AYRI MESAJ GÖNDER
                     for setup in setups:
                         setup_type = setup['type']
                         confidence = setup['confidence']
@@ -503,22 +526,25 @@ def handle_scan_command(chat_id):
                         stop_loss = setup.get('stop_loss', 'N/A')
                         tp1 = setup.get('tp1', 'N/A')
                         tp2 = setup.get('tp2', 'N/A')
-                        detailed_explanation = setup.get('detailed_explanation', setup.get('details', ''))
                         timeframe = setup.get('timeframe', '5m')
                         
-                        # TRACKING KAYDI EKLE
+                        # v1.4.10.0: entry_price - OB/FVG mid-point
+                        entry_price = setup.get('entry_price', setup.get('current_price', market_data['current_price']))
+                        
+                        # TRACKING KAYDI
                         try:
                             setup_id = _tracking.log_setup({
                                 'pair': pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT'),
                                 'timestamp': f"{market_data['current_date']} {market_data['current_time']}",
                                 'setup_type': setup_type,
                                 'confidence': confidence,
-                                'timeframe': timeframe,  # v1.4.9.5: timeframe eklendi
+                                'timeframe': timeframe,
                                 'entry_zone': entry_zone,
                                 'stop_loss': stop_loss,
                                 'tp1': tp1,
                                 'tp2': tp2,
-                                'current_price': setup.get('current_price', market_data['current_price']),
+                                'current_price': market_data['current_price'],
+                                'entry_price': entry_price,
                                 'stop_price': setup.get('stop_price', 0),
                                 'tp1_price': setup.get('tp1_price', 0),
                                 'tp2_price': setup.get('tp2_price', 0),
@@ -528,36 +554,33 @@ def handle_scan_command(chat_id):
                                 'balance_before': 1000.00,
                                 'risk_percent': 2.0
                             })
-                            logger.info(f"✅ Setup #{setup_id} logged and tracked")
+                            
+                            # v1.4.10.2: Duplicate ise None döner, mesaj gönderme
+                            if setup_id is None:
+                                skipped_duplicates += 1
+                                continue
+                            
+                            logger.info(f"✅ Setup #{setup_id} logged (entry: {format_price(entry_price)})")
                         except Exception as track_error:
                             logger.error(f"❌ Tracking failed: {track_error}")
+                            setup_id = "N/A"
                         
-                        message = f"""```
-🚨 SETUP DETECTED!
+                        # v1.4.10.0: KISA FORMAT - Detaylar ve AI düşünceler YOK
+                        message = f"""🚨 **SETUP #{setup_id.upper()} DETECTED!**
 
 📊 Parite: {pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')}
 🎯 Setup: {setup_type}
-⏱️ Timeframe: {timeframe.upper()}
-{"🔴 Bias: SHORT" if 'SHORT' in setup_type else "🟢 Bias: LONG"}
-⚡ Confidence: {confidence}
+⏱️ TF: {timeframe.lower()}
+{"🔴 SHORT" if 'SHORT' in setup_type else "🟢 LONG"}
+⚡ {confidence}
 
-💰 Mevcut Fiyat: ${market_data['current_price']:,.2f}
-🎯 Entry Zone: {entry_zone}
-🛡️ Stop Loss: {stop_loss}
-🎁 TP1 (Tars TP): {tp1}
-🎁 TP2 (Kadircan TP): {tp2}
-📅 Time: {market_data['current_time']}
-```
+💰 Entry: {format_price(entry_price)}
+🛡️ Stop: {stop_loss}
+🎁 TP1: {tp1}
+🎁 TP2: {tp2}
+📊 R:R: 1:{setup.get('rr_ratio', 0):.1f}
 
----
-**📊 Detaylar:**
-
-{detailed_explanation}
-
----
-🤖 **AI Genel Düşünceler:**
-
-_"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop tight ama realistic, TP mantıklı seviyede. Entry zone'da patience kritik - aggressive giriş riskli. R:R oranı solid setup sunuyor."_
+⏰ {market_data['current_time']}
 """
                         _telegram.send_signal(message)
                         total_new_setups += 1
@@ -570,7 +593,7 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
                 logger.error(f"Error scanning {pair}: {e}")
                 results.append(f"❌ {pair.replace('/USDT:USDT', 'USDT')}: Error")
         
-        # TARAMA SONUÇLARI + AKTİF SETUP LİSTESİ
+        # TARAMA SONUÇLARI
         try:
             pending_data = _tracking.get_all_pending_setups()
             pending_setups = pending_data.get('setups', [])
@@ -584,7 +607,6 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
             if pending_setups and len(pending_setups) > 0:
                 summary += f"\n\n---\n📊 **AKTİF SETUP'LAR:** {len(pending_setups)} adet\n"
                 
-                # v1.4.9.6: Timeframe breakdown
                 if tf_breakdown:
                     tf_order = ['4h', '1h', '15m', '5m', '3m', 'N/A']
                     tf_parts = []
@@ -594,12 +616,12 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
                     if tf_parts:
                         summary += f"⏱️ TF: {' | '.join(tf_parts)}\n"
                 
-                for setup in pending_setups[:10]:  # Max 10 göster
+                for setup in pending_setups[:10]:
                     setup_id = setup['id'][:8].upper()
                     pair = setup['pair']
                     setup_type = setup['setup_type']
                     status = setup['status']
-                    tf = setup.get('timeframe', 'N/A').lower()  # v1.4.9.8: küçük harf
+                    tf = setup.get('timeframe', 'N/A').lower()
                     status_emoji = '🎯' if status == 'TP1' else '⏳'
                     summary += f"\n{status_emoji} #{setup_id} - {pair} ({tf}) - {setup_type} ({status})"
                 
@@ -616,10 +638,12 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
             summary = "🔍 **TARAMA TAMAMLANDI**\n\n"
             summary += "\n".join(results)
             summary += f"\n\n🎯 **Toplam:** {total_new_setups} yeni setup bulundu"
+            if skipped_duplicates > 0:
+                summary += f" ({skipped_duplicates} duplicate atlandı)"
             summary += f"\n\n⏰ {get_turkey_time().strftime('%H:%M:%S')}"
             _telegram.send(summary, chat_id=chat_id)
         
-        logger.info(f"✅ Manual scan completed: {len(pairs)} pairs, {total_new_setups} new setups")
+        logger.info(f"✅ Manual scan completed: {len(pairs)} pairs, {total_new_setups} new setups, {skipped_duplicates} duplicates skipped")
         
     except Exception as e:
         logger.error(f"❌ Scan command error: {e}")
@@ -636,15 +660,12 @@ _"Bu setup, güçlü OB reaction + volume spike kombinasyonuna dayanıyor. Stop 
 def handle_score_command(chat_id):
     """
     /score - Performance raporu
-    v1.4.9.8: Son reset zamanı eklendi
     """
     try:
         _telegram.send("📊 İstatistikler hesaplanıyor...", chat_id=chat_id)
         
-        # Aggregate stats
         stats = _tracking.get_aggregate_stats()
         
-        # v1.4.9.8: Son reset zamanı
         last_reset = _tracking.get_last_reset_time()
         if last_reset:
             try:
@@ -655,11 +676,9 @@ def handle_score_command(chat_id):
         else:
             reset_text = ""
         
-        # Duration formatı
         avg_duration = stats.get('avg_duration_minutes', 0)
         duration_text = f"⏱️ Avg Duration: {avg_duration:.1f} minutes\n" if avg_duration > 0 else ""
         
-        # v1.4.9.6: Timeframe breakdown text
         tf_breakdown = stats.get('timeframe_breakdown', {})
         tf_text = ""
         if tf_breakdown:
@@ -674,7 +693,6 @@ def handle_score_command(chat_id):
                     pending = data['pending']
                     win_rate = data['win_rate']
                     
-                    # Sadece veri varsa göster
                     if total > 0:
                         completed = wins + losses
                         if completed > 0:
@@ -685,7 +703,6 @@ def handle_score_command(chat_id):
                         elif pending > 0:
                             tf_text += f"• {tf}: {pending} aktif setup\n"
         
-        # v1.4.9.6: Detailed stats
         total_setups = stats['total_setups']
         winning = stats['winning_trades']
         losing = stats['losing_trades']
@@ -725,12 +742,11 @@ def handle_score_command(chat_id):
 
 def handle_reset_score_command(chat_id):
     """
-    /reset_score - Tüm istatistikleri sıfırla (GİZLİ KOMUT - /help'te görünmez)
+    /reset_score - Tüm istatistikleri sıfırla (GİZLİ KOMUT)
     """
     try:
         _telegram.send("🔄 İstatistikler sıfırlanıyor...", chat_id=chat_id)
         
-        # Tracking service'de reset fonksiyonu çağır
         result = _tracking.reset_all_tracking()
         
         if result:
@@ -758,10 +774,9 @@ _Yeni setup'lar /scan ile oluşturulabilir._
 
 def handle_help_command(chat_id):
     """
-    Yardım mesajı - v1.4.9.5: CHANGELOG parse geri eklendi
+    Yardım mesajı
     """
     try:
-        # CHANGELOG'dan version features'ı parse et
         version_features_list = []
         try:
             version_features_list = _storage.parse_version_features(Config.VERSION)
@@ -769,7 +784,6 @@ def handle_help_command(chat_id):
             logger.warning(f"Could not parse CHANGELOG: {e}")
             version_features_list = []
         
-        # Base help text
         help_text = f"""
 🤖 **T-TARS Trading Bot v{Config.VERSION}**
 
@@ -786,7 +800,6 @@ BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
 ⏰ Auto-scan her 3 dakikada calisir
 """
         
-        # CHANGELOG varsa ekle (list'i string'e çevir)
         if version_features_list and len(version_features_list) > 0:
             features_text = '\n'.join(version_features_list)
             help_text += f"""
@@ -801,7 +814,6 @@ BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
         
     except Exception as e:
         logger.error(f"❌ Help command error: {e}")
-        # Fallback - basit help mesajı
         fallback_help = f"""
 🤖 **T-TARS Trading Bot v{Config.VERSION}**
 

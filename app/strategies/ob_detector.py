@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v1.4.9.5
-===========================
+T-TARS OB Detector v2.0.2
+=========================
 Order Block setup detection (LONG + SHORT)
 
-v1.4.9.5:
-- pair parametresi eklendi (log'da coin ismi görünsün)
-- STOP_MULTIPLIER artık 1.0 (calculators'dan)
+v2.0.2:
+- direction field eklendi (OKX order için ZORUNLU)
 
-v1.4.9.3:
-- format_price() kullanılıyor (SHIB/DOGE desteği)
+v1.4.9.5:
+- pair parametresi eklendi
+- STOP_MULTIPLIER artık 1.0
 """
 
 import logging
@@ -30,53 +30,38 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
     """
     Bullish Order Block setup tespiti
     
-    Args:
-        ob: Order block dict
-        volume: Volume data dict
-        atr: ATR değeri
-        timeframe: Timeframe string
-        current_price: Mevcut fiyat
-        pair: Parite ismi (log için)
-    
     Returns:
         dict: Setup bilgileri veya None
     """
     try:
-        # Coin ismi (log için)
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         
-        # Volume confirmed kontrolü (OB bulunduğu andaki volume)
         if not ob.get('volume_confirmed', False):
             logger.info(f"{coin} OB LONG rejected: volume_confirmed=False")
             return None
         
-        # Entry hesaplama
-        entry_price = (ob['low'] + ob['price']) / 2  # OB mid-point
+        entry_price = (ob['low'] + ob['price']) / 2
         entry_zone = f"{format_price(ob['low'])} - {format_price(ob['price'])}"
         
-        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = ob['low'] - stop_distance
         stop_loss = format_price(stop_price)
         
-        # TP hesaplama
         tp1_price = entry_price + (atr * TP1_MULTIPLIER)
         tp2_price = entry_price + (atr * TP2_MULTIPLIER)
         tp1 = format_price(tp1_price)
         tp2 = format_price(tp2_price)
         
-        # R:R hesaplama
         risk = abs(entry_price - stop_price)
         reward = abs(tp1_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 {coin} OB LONG R:R: {rr_ratio:.2f} (entry={format_price(entry_price)}, stop={format_price(stop_price)}, tp1={format_price(tp1_price)})")
+        logger.info(f"📊 {coin} OB LONG R:R: {rr_ratio:.2f}")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"{coin} OB LONG rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
             return None
         
-        # Risk hesabı
         balance = Config.DEFAULT_BALANCE
         volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
@@ -106,6 +91,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         
         return {
             'type': 'OB + Volume Spike (LONG)',
+            'direction': 'LONG',  # v2.0.2: OKX order için ZORUNLU
             'confidence': 'HIGH',
             'timeframe': timeframe,
             'entry_zone': entry_zone,
@@ -133,53 +119,38 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
     """
     Bearish Order Block setup tespiti
     
-    Args:
-        ob: Order block dict
-        volume: Volume data dict
-        atr: ATR değeri
-        timeframe: Timeframe string
-        current_price: Mevcut fiyat
-        pair: Parite ismi (log için)
-    
     Returns:
         dict: Setup bilgileri veya None
     """
     try:
-        # Coin ismi (log için)
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         
-        # Volume confirmed kontrolü (OB bulunduğu andaki volume)
         if not ob.get('volume_confirmed', False):
             logger.info(f"{coin} OB SHORT rejected: volume_confirmed=False")
             return None
         
-        # Entry hesaplama
-        entry_price = (ob['price'] + ob['high']) / 2  # OB mid-point
+        entry_price = (ob['price'] + ob['high']) / 2
         entry_zone = f"{format_price(ob['price'])} - {format_price(ob['high'])}"
         
-        # Stop hesaplama
         stop_distance = atr * STOP_MULTIPLIER
         stop_price = ob['high'] + stop_distance
         stop_loss = format_price(stop_price)
         
-        # TP hesaplama
         tp1_price = entry_price - (atr * TP1_MULTIPLIER)
         tp2_price = entry_price - (atr * TP2_MULTIPLIER)
         tp1 = format_price(tp1_price)
         tp2 = format_price(tp2_price)
         
-        # R:R hesaplama
         risk = abs(stop_price - entry_price)
         reward = abs(entry_price - tp1_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
-        logger.info(f"📊 {coin} OB SHORT R:R: {rr_ratio:.2f} (entry={format_price(entry_price)}, stop={format_price(stop_price)}, tp1={format_price(tp1_price)})")
+        logger.info(f"📊 {coin} OB SHORT R:R: {rr_ratio:.2f}")
         
         if rr_ratio < MIN_RR_RATIO:
             logger.info(f"{coin} OB SHORT rejected: R:R {rr_ratio:.1f} < {MIN_RR_RATIO}")
             return None
         
-        # Risk hesabı
         balance = Config.DEFAULT_BALANCE
         volume_spike_ratio = volume.get('spike_ratio', 1.0)
         setup_strength = calculate_setup_strength(
@@ -209,6 +180,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         
         return {
             'type': 'OB + Volume Spike (SHORT)',
+            'direction': 'SHORT',  # v2.0.2: OKX order için ZORUNLU
             'confidence': 'HIGH',
             'timeframe': timeframe,
             'entry_zone': entry_zone,

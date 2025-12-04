@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v1.4.10.2
-==================================
+T-TARS Telegram Handlers v2.0.0
+================================
 Telegram bot komut handler'ları.
+
+v2.0.0:
+- YENİ: /balance - OKX bakiye
+- YENİ: /positions - Açık pozisyonlar
+- YENİ: /stopokx - Trading durdur
+- YENİ: /startokx - Trading başlat
+- /score: Top 3 timeframe + Top 3 coin eklendi
+- AUTO_SCAN_PAIRS genişletildi (13 coin)
+- Beta group kaldırıldı
 
 v1.4.10.2:
 - FIX: Duplicate detection - /scan'de aynı setup tekrar oluşturulmaz
 - Duplicate ise mesaj gönderilmez
-
-v1.4.10.0:
-- SETUP DETECTED mesajı KISA format (detaylar ve AI düşünceler kaldırıldı)
-- entry_price log_setup'a eklendi
 """
 
 import logging
@@ -57,6 +62,9 @@ _claude = None
 _storage = None
 _tracking = None
 
+# v2.0.0: Trading flag (runtime control)
+_trading_enabled = True
+
 
 def init_handlers(telegram, okx, claude, storage, tracking):
     """Initialize handlers with service instances"""
@@ -66,7 +74,7 @@ def init_handlers(telegram, okx, claude, storage, tracking):
     _claude = claude
     _storage = storage
     _tracking = tracking
-    logger.info("✅ Telegram handlers initialized")
+    logger.info("✅ Telegram handlers initialized (v2.0.0)")
 
 
 def handle_plan_command(text, chat_id):
@@ -415,7 +423,10 @@ Sadece doldurulmuş şablonu döndür.
 
 
 def handle_status_command(chat_id):
-    """Bot durum kontrolü"""
+    """
+    Bot durum kontrolü
+    v2.0.0: OKX API durumu ve Trading flag eklendi
+    """
     try:
         import time
         from anthropic import Anthropic
@@ -424,7 +435,8 @@ def handle_status_command(chat_id):
         
         services_status = {
             'telegram': '⏳',
-            'okx': '⏳',
+            'okx_market': '⏳',
+            'okx_api': '⏳',
             'claude': '⏳',
             'storage': '⏳'
         }
@@ -435,11 +447,25 @@ def handle_status_command(chat_id):
         except:
             services_status['telegram'] = '❌'
         
+        # OKX Market Data (fiyat)
         try:
             test_price = _okx.get_current_price('BTC/USDT:USDT')
-            services_status['okx'] = f'✅ (${test_price:,.2f})'
+            services_status['okx_market'] = f'✅ (${test_price:,.2f})'
         except Exception as e:
-            services_status['okx'] = f'❌ ({str(e)[:20]})'
+            services_status['okx_market'] = f'❌ ({str(e)[:20]})'
+        
+        # v2.0.0: OKX API (authenticated)
+        try:
+            if _okx.authenticated:
+                balance = _okx.get_balance()
+                if balance.get('success'):
+                    services_status['okx_api'] = f'✅ (${balance["total"]:,.2f})'
+                else:
+                    services_status['okx_api'] = '❌ (balance error)'
+            else:
+                services_status['okx_api'] = '⚠️ (no auth)'
+        except Exception as e:
+            services_status['okx_api'] = f'❌ ({str(e)[:20]})'
         
         try:
             client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
@@ -460,6 +486,9 @@ def handle_status_command(chat_id):
         
         check_time = (time.time() - check_start) * 1000
         
+        # v2.0.0: Trading status
+        trading_status = '🟢 AKTİF' if _trading_enabled else '🔴 DURDURULDU'
+        
         status_message = f"""
 🤖 **T-TARS BOT DURUM KONTROLÜ**
 
@@ -471,7 +500,8 @@ def handle_status_command(chat_id):
 📡 **SERVİSLER:**
 
 • Telegram: {services_status['telegram']}
-• OKX Market: {services_status['okx']}
+• OKX Market: {services_status['okx_market']}
+• OKX API: {services_status['okx_api']}
 • Claude AI: {services_status['claude']}
 • Cloud Storage: {services_status['storage']}
 
@@ -481,6 +511,7 @@ def handle_status_command(chat_id):
 
 • Bot Version: v{Config.VERSION}
 • Model: {Config.CLAUDE_MODEL}
+• Trading: {trading_status}
 • Environment: Google Cloud Run
 • Region: us-central1
 
@@ -565,24 +596,9 @@ def handle_scan_command(chat_id):
                             logger.error(f"❌ Tracking failed: {track_error}")
                             setup_id = "N/A"
                         
-                        # v1.4.10.0: KISA FORMAT - Detaylar ve AI düşünceler YOK
-                        message = f"""🚨 **SETUP #{setup_id.upper()} DETECTED!**
-
-📊 Parite: {pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')}
-🎯 Setup: {setup_type}
-⏱️ TF: {timeframe.lower()}
-{"🔴 SHORT" if 'SHORT' in setup_type else "🟢 LONG"}
-⚡ {confidence}
-
-💰 Entry: {format_price(entry_price)}
-🛡️ Stop: {stop_loss}
-🎁 TP1: {tp1}
-🎁 TP2: {tp2}
-📊 R:R: 1:{setup.get('rr_ratio', 0):.1f}
-
-⏰ {market_data['current_time']}
-"""
-                        _telegram.send_signal(message)
+                        # v2.0.1: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
+                        # Sadece tracking'e kaydet
+                        logger.info(f"✅ Setup #{setup_id} logged [silent]")
                         total_new_setups += 1
                     
                     results.append(f"✅ {pair.replace('/USDT:USDT', 'USDT')}: {len(setups)} setup(s) found")
@@ -595,46 +611,49 @@ def handle_scan_command(chat_id):
         
         # TARAMA SONUÇLARI
         try:
-            pending_data = _tracking.get_all_pending_setups()
-            pending_setups = pending_data.get('setups', [])
-            tf_breakdown = pending_data.get('timeframe_breakdown', {})
-            
             summary = "🔍 **TARAMA TAMAMLANDI**\n\n"
             summary += "📊 **Yeni Setup'lar:**\n"
             summary += "\n".join(results)
             summary += f"\n\n🎯 **Toplam:** {total_new_setups} yeni setup bulundu"
             
-            if pending_setups and len(pending_setups) > 0:
-                summary += f"\n\n---\n📊 **AKTİF SETUP'LAR:** {len(pending_setups)} adet\n"
+            # v2.0.1: OKX'ten GERÇEK pozisyonları çek
+            try:
+                positions = _okx.get_positions() if _okx.authenticated else []
                 
-                if tf_breakdown:
-                    tf_order = ['4h', '1h', '15m', '5m', '3m', 'N/A']
-                    tf_parts = []
-                    for tf in tf_order:
-                        if tf in tf_breakdown:
-                            tf_parts.append(f"{tf}: {tf_breakdown[tf]}")
-                    if tf_parts:
-                        summary += f"⏱️ TF: {' | '.join(tf_parts)}\n"
-                
-                for setup in pending_setups[:10]:
-                    setup_id = setup['id'][:8].upper()
-                    pair = setup['pair']
-                    setup_type = setup['setup_type']
-                    status = setup['status']
-                    tf = setup.get('timeframe', 'N/A').lower()
-                    status_emoji = '🎯' if status == 'TP1' else '⏳'
-                    summary += f"\n{status_emoji} #{setup_id} - {pair} ({tf}) - {setup_type} ({status})"
-                
-                if len(pending_setups) > 10:
-                    summary += f"\n... ve {len(pending_setups) - 10} setup daha"
-            else:
-                summary += "\n\nℹ️ Aktif setup yok"
+                if positions and len(positions) > 0:
+                    summary += f"\n\n---\n📊 **AÇIK POZİSYONLAR:** {len(positions)} adet\n"
+                    
+                    total_pnl = 0
+                    for pos in positions:
+                        symbol = pos['symbol'].replace('/USDT:USDT', '').replace('/USDT', '')
+                        side = pos['side'].upper()
+                        side_emoji = '🟢' if side == 'LONG' else '🔴'
+                        
+                        entry = float(pos.get('entry_price', 0))
+                        pnl = float(pos.get('unrealized_pnl', 0))
+                        pnl_pct = float(pos.get('percentage', 0))
+                        leverage = pos.get('leverage', 1)
+                        
+                        total_pnl += pnl
+                        
+                        pnl_emoji = '💚' if pnl >= 0 else '❤️'
+                        
+                        summary += f"\n{side_emoji} {symbol} {side} x{leverage} | {pnl_emoji} ${pnl:+.2f} ({pnl_pct:+.1f}%)"
+                    
+                    pnl_emoji = '💚' if total_pnl >= 0 else '❤️'
+                    summary += f"\n\n{pnl_emoji} **Toplam P/L:** ${total_pnl:+.2f}"
+                else:
+                    summary += "\n\nℹ️ Açık pozisyon yok"
+                    
+            except Exception as pos_error:
+                logger.error(f"❌ Error fetching OKX positions: {pos_error}")
+                summary += "\n\n⚠️ OKX pozisyonları alınamadı"
             
             summary += f"\n\n⏰ {get_turkey_time().strftime('%H:%M:%S')}"
             _telegram.send(summary, chat_id=chat_id)
             
         except Exception as e:
-            logger.error(f"❌ Error fetching active setups: {e}")
+            logger.error(f"❌ Error sending scan summary: {e}")
             summary = "🔍 **TARAMA TAMAMLANDI**\n\n"
             summary += "\n".join(results)
             summary += f"\n\n🎯 **Toplam:** {total_new_setups} yeni setup bulundu"
@@ -660,6 +679,7 @@ def handle_scan_command(chat_id):
 def handle_score_command(chat_id):
     """
     /score - Performance raporu
+    v2.0.0: Top 3 timeframe + Top 3 coin eklendi
     """
     try:
         _telegram.send("📊 İstatistikler hesaplanıyor...", chat_id=chat_id)
@@ -679,29 +699,54 @@ def handle_score_command(chat_id):
         avg_duration = stats.get('avg_duration_minutes', 0)
         duration_text = f"⏱️ Avg Duration: {avg_duration:.1f} minutes\n" if avg_duration > 0 else ""
         
+        # v2.0.0: Top 3 Timeframe (win rate'e göre sıralı)
         tf_breakdown = stats.get('timeframe_breakdown', {})
-        tf_text = ""
+        top_tf_text = ""
         if tf_breakdown:
-            tf_text = "\n📊 **Timeframe Analizi:**\n"
-            tf_order = ['4h', '1h', '15m', '5m', '3m', 'N/A']
-            for tf in tf_order:
-                if tf in tf_breakdown:
-                    data = tf_breakdown[tf]
-                    total = data['total']
-                    wins = data['wins']
-                    losses = data['losses']
-                    pending = data['pending']
-                    win_rate = data['win_rate']
-                    
-                    if total > 0:
-                        completed = wins + losses
-                        if completed > 0:
-                            tf_text += f"• {tf}: {total} setup ({wins}W/{losses}L, {win_rate:.0f}%)"
-                            if pending > 0:
-                                tf_text += f" +{pending} aktif"
-                            tf_text += "\n"
-                        elif pending > 0:
-                            tf_text += f"• {tf}: {pending} aktif setup\n"
+            # Win rate'e göre sırala (min 3 completed trade olanlar)
+            tf_sorted = []
+            for tf, data in tf_breakdown.items():
+                completed = data['wins'] + data['losses']
+                if completed >= 3:
+                    tf_sorted.append({
+                        'tf': tf,
+                        'wins': data['wins'],
+                        'losses': data['losses'],
+                        'win_rate': data['win_rate'],
+                        'completed': completed
+                    })
+            
+            tf_sorted.sort(key=lambda x: x['win_rate'], reverse=True)
+            
+            if tf_sorted:
+                top_tf_text = "\n🏆 **Top 3 Timeframe:**\n"
+                for i, item in enumerate(tf_sorted[:3], 1):
+                    medal = '🥇' if i == 1 else ('🥈' if i == 2 else '🥉')
+                    top_tf_text += f"{medal} {item['tf']}: {item['win_rate']:.0f}% ({item['wins']}W/{item['losses']}L)\n"
+        
+        # v2.0.0: Top 3 Coin (win rate'e göre sıralı)
+        coin_breakdown = stats.get('coin_breakdown', {})
+        top_coin_text = ""
+        if coin_breakdown:
+            coin_sorted = []
+            for coin, data in coin_breakdown.items():
+                completed = data['wins'] + data['losses']
+                if completed >= 3:
+                    coin_sorted.append({
+                        'coin': coin,
+                        'wins': data['wins'],
+                        'losses': data['losses'],
+                        'win_rate': data['win_rate'],
+                        'completed': completed
+                    })
+            
+            coin_sorted.sort(key=lambda x: x['win_rate'], reverse=True)
+            
+            if coin_sorted:
+                top_coin_text = "\n💰 **Top 3 Coin:**\n"
+                for i, item in enumerate(coin_sorted[:3], 1):
+                    medal = '🥇' if i == 1 else ('🥈' if i == 2 else '🥉')
+                    top_coin_text += f"{medal} {item['coin']}: {item['win_rate']:.0f}% ({item['wins']}W/{item['losses']}L)\n"
         
         total_setups = stats['total_setups']
         winning = stats['winning_trades']
@@ -727,7 +772,7 @@ def handle_score_command(chat_id):
 
 {duration_text}📈 **Best Performer:**
 {stats['best_setup_type']}
-{tf_text}{reset_text}
+{top_tf_text}{top_coin_text}{reset_text}
 ---
 ⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
 """
@@ -772,6 +817,306 @@ _Yeni setup'lar /scan ile oluşturulabilir._
         _telegram.send(f"❌ Hata: {str(e)}", chat_id=chat_id)
 
 
+# ============================================
+# v2.0.0: OKX API COMMANDS
+# ============================================
+
+def handle_balance_command(chat_id):
+    """
+    /balance - OKX hesap bakiyesi
+    """
+    try:
+        _telegram.send("💰 OKX bakiye sorgulanıyor...", chat_id=chat_id)
+        
+        # OKX API'den bakiye al
+        if not _okx.authenticated:
+            _telegram.send("❌ OKX API bağlantısı yok. API key'leri kontrol edin.", chat_id=chat_id)
+            return
+        
+        balance = _okx.get_balance()
+        
+        if not balance.get('success'):
+            _telegram.send(f"❌ Bakiye alınamadı: {balance.get('error', 'Unknown')}", chat_id=chat_id)
+            return
+        
+        message = f"""
+💰 **OKX HESAP BAKİYESİ**
+
+💵 **USDT:**
+• Total: ${balance['total']:,.2f}
+• Free: ${balance['free']:,.2f}
+• Used: ${balance['used']:,.2f}
+
+⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        _telegram.send(message, chat_id=chat_id)
+        logger.info(f"✅ Balance command sent to {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Balance command error: {e}")
+        _telegram.send(f"❌ Bakiye hatası: {str(e)}", chat_id=chat_id)
+
+
+def handle_positions_command(chat_id):
+    """
+    /positions - Açık pozisyonları listele
+    """
+    try:
+        _telegram.send("📊 OKX pozisyonlar sorgulanıyor...", chat_id=chat_id)
+        
+        if not _okx.authenticated:
+            _telegram.send("❌ OKX API bağlantısı yok. API key'leri kontrol edin.", chat_id=chat_id)
+            return
+        
+        positions = _okx.get_positions()
+        
+        if not positions:
+            _telegram.send("ℹ️ Açık pozisyon yok.", chat_id=chat_id)
+            return
+        
+        message = f"📊 **AÇIK POZİSYONLAR** ({len(positions)} adet)\n\n"
+        
+        total_pnl = 0
+        for pos in positions:
+            symbol = pos['symbol'].replace('/USDT:USDT', '').replace('/USDT', '')
+            side = pos['side'].upper()
+            side_emoji = '🟢' if side == 'LONG' else '🔴'
+            
+            entry = pos.get('entry_price', 0)
+            mark = pos.get('mark_price', 0)
+            pnl = pos.get('unrealized_pnl', 0)
+            pnl_pct = pos.get('percentage', 0)
+            contracts = pos.get('contracts', 0)
+            leverage = pos.get('leverage', 1)
+            
+            total_pnl += float(pnl) if pnl else 0
+            
+            pnl_emoji = '💚' if float(pnl or 0) >= 0 else '❤️'
+            
+            message += f"{side_emoji} **{symbol}** {side} x{leverage}\n"
+            message += f"   📍 Entry: ${float(entry):,.2f}\n"
+            message += f"   📈 Mark: ${float(mark):,.2f}\n"
+            message += f"   {pnl_emoji} P/L: ${float(pnl):+,.2f} ({float(pnl_pct):+.2f}%)\n\n"
+        
+        pnl_emoji = '💚' if total_pnl >= 0 else '❤️'
+        message += f"---\n{pnl_emoji} **Toplam P/L:** ${total_pnl:+,.2f}\n"
+        message += f"⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        _telegram.send(message, chat_id=chat_id)
+        logger.info(f"✅ Positions command sent to {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Positions command error: {e}")
+        _telegram.send(f"❌ Pozisyon hatası: {str(e)}", chat_id=chat_id)
+
+
+def handle_stopokx_command(chat_id):
+    """
+    /stopokx - Trading'i durdur (yeni pozisyon açmaz)
+    """
+    global _trading_enabled
+    
+    try:
+        _trading_enabled = False
+        
+        message = f"""
+🔴 **TRADİNG DURDURULDU**
+
+⛔ Bot artık yeni pozisyon AÇMAYACAK
+📊 Mevcut pozisyonlar etkilenmez
+🔍 Analiz ve tarama devam eder
+
+Tekrar başlatmak için: /startokx
+
+⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        _telegram.send(message, chat_id=chat_id)
+        logger.warning(f"🔴 Trading DISABLED by chat_id: {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ StopOKX command error: {e}")
+        _telegram.send(f"❌ Hata: {str(e)}", chat_id=chat_id)
+
+
+def handle_startokx_command(chat_id):
+    """
+    /startokx - Trading'i başlat (yeni pozisyon açabilir)
+    """
+    global _trading_enabled
+    
+    try:
+        _trading_enabled = True
+        
+        message = f"""
+🟢 **TRADİNG BAŞLATILDI**
+
+✅ Bot artık yeni pozisyon AÇABİLİR
+📊 Risk limitleri aktif
+🔍 Setup'lar değerlendirilecek
+
+Durdurmak için: /stopokx
+
+⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        _telegram.send(message, chat_id=chat_id)
+        logger.info(f"🟢 Trading ENABLED by chat_id: {chat_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ StartOKX command error: {e}")
+        _telegram.send(f"❌ Hata: {str(e)}", chat_id=chat_id)
+
+
+def is_trading_enabled():
+    """Trading durumunu kontrol et"""
+    return _trading_enabled
+
+
+def execute_trade_for_setup(setup_data, chat_id=None):
+    """
+    v2.0.0: Setup için OKX'te işlem aç
+    
+    Args:
+        setup_data: Setup bilgileri (pair, direction, entry, stop, tp1, tp2, etc.)
+        chat_id: Telegram chat ID for notifications
+    
+    Returns:
+        dict: Order result or None
+    """
+    try:
+        pair = setup_data.get('pair', 'UNKNOWN')
+        direction = setup_data.get('direction', 'LONG')
+        entry_price = setup_data.get('entry_price', 0)
+        stop_price = setup_data.get('stop_price', 0)
+        tp1_price = setup_data.get('tp1_price', 0)
+        tp2_price = setup_data.get('tp2_price', 0)
+        setup_type = setup_data.get('setup_type', 'Unknown')
+        timeframe = setup_data.get('timeframe', 'N/A')
+        setup_id = setup_data.get('setup_id', 'N/A')
+        
+        # 1. Trading enabled kontrolü
+        if not _trading_enabled:
+            logger.info(f"⏸️ Trading disabled, skipping order for {pair}")
+            return {'success': False, 'reason': 'trading_disabled'}
+        
+        # 2. OKX authenticated kontrolü
+        if not _okx.authenticated:
+            logger.warning(f"❌ OKX not authenticated, cannot place order")
+            return {'success': False, 'reason': 'not_authenticated'}
+        
+        # 3. Paritede mevcut pozisyon kontrolü
+        existing_positions = _okx.get_positions(pair)
+        if existing_positions and len(existing_positions) > 0:
+            logger.info(f"⚠️ Position already exists for {pair}, skipping new order")
+            if chat_id:
+                _telegram.send(f"⚠️ {pair}: Mevcut pozisyon var, yeni işlem açılmadı.", chat_id=chat_id)
+            return {'success': False, 'reason': 'position_exists', 'existing': existing_positions[0]}
+        
+        # 4. Risk hesaplama
+        balance = _okx.get_balance()
+        if not balance.get('success'):
+            logger.error(f"❌ Could not get balance for risk calculation")
+            return {'success': False, 'reason': 'balance_error'}
+        
+        available_balance = balance.get('free', 0)
+        
+        # Risk %1-2 (Config'den al)
+        risk_percent = Config.RISK_PER_TRADE_MAX / 100  # 2%
+        risk_amount = available_balance * risk_percent
+        
+        # Position size hesapla (stop loss mesafesine göre)
+        if entry_price > 0 and stop_price > 0:
+            stop_distance_percent = abs(entry_price - stop_price) / entry_price
+            if stop_distance_percent > 0:
+                position_size_usd = risk_amount / stop_distance_percent
+            else:
+                position_size_usd = risk_amount * 10  # Default leverage assumption
+        else:
+            position_size_usd = risk_amount * 10
+        
+        # Max position size kontrolü
+        max_position = Config.MAX_POSITION_SIZE
+        if position_size_usd > max_position:
+            position_size_usd = max_position
+            logger.info(f"📊 Position size capped at ${max_position}")
+        
+        # Min position size kontrolü
+        if position_size_usd < 5:
+            logger.warning(f"⚠️ Position size too small: ${position_size_usd:.2f}")
+            return {'success': False, 'reason': 'position_too_small'}
+        
+        # 5. Order side belirle
+        side = 'buy' if direction.upper() == 'LONG' else 'sell'
+        
+        # 6. OKX symbol format
+        okx_symbol = pair.replace('USDT', '/USDT:USDT') if 'USDT' in pair and '/' not in pair else pair
+        
+        # 7. Amount hesapla (kontrat sayısı)
+        # Position size USD / entry price = coin amount
+        if entry_price > 0:
+            amount = position_size_usd / entry_price
+        else:
+            logger.error(f"❌ Invalid entry price: {entry_price}")
+            return {'success': False, 'reason': 'invalid_entry_price'}
+        
+        logger.info(f"🚀 Placing order: {okx_symbol} {side.upper()} ${position_size_usd:.2f} (amount: {amount})")
+        
+        # 8. Order gönder (TP/SL ile)
+        order_result = _okx.place_order_with_tp_sl(
+            symbol=okx_symbol,
+            side=side,
+            amount=amount,
+            tp_price=tp1_price,  # İlk hedef TP1
+            sl_price=stop_price
+        )
+        
+        if order_result and order_result.get('success'):
+            order_id = order_result.get('order_id', 'N/A')
+            
+            # Telegram bildirimi
+            trade_message = f"""
+🚀 **ORDER PLACED** ✅
+
+📊 Parite: {pair}
+🎯 Setup: {setup_type}
+⏱️ TF: {timeframe}
+{'🟢 LONG' if direction.upper() == 'LONG' else '🔴 SHORT'}
+
+💰 Size: ${position_size_usd:.2f}
+📍 Entry: ${entry_price:,.4f}
+🛡️ Stop: ${stop_price:,.4f}
+🎁 TP1: ${tp1_price:,.4f}
+
+📋 Order ID: {order_id[:16]}...
+
+⏰ {get_turkey_time().strftime('%H:%M:%S')}
+"""
+            
+            target_chat = chat_id or Config.TELEGRAM_CHAT_ID
+            _telegram.send(trade_message, chat_id=target_chat)
+            
+            logger.info(f"✅ Order placed successfully: {order_id}")
+            return {
+                'success': True,
+                'order_id': order_id,
+                'symbol': okx_symbol,
+                'side': side,
+                'amount': amount,
+                'position_size_usd': position_size_usd
+            }
+        else:
+            error_msg = order_result.get('error', 'Unknown error') if order_result else 'No response'
+            logger.error(f"❌ Order failed: {error_msg}")
+            
+            if chat_id:
+                _telegram.send(f"❌ Order başarısız: {error_msg}", chat_id=chat_id)
+            
+            return {'success': False, 'reason': 'order_failed', 'error': error_msg}
+        
+    except Exception as e:
+        logger.error(f"❌ Execute trade error: {e}")
+        return {'success': False, 'reason': 'exception', 'error': str(e)}
+
+
 def handle_help_command(chat_id):
     """
     Yardım mesajı
@@ -794,8 +1139,16 @@ def handle_help_command(chat_id):
 📡 /status - Bot durum kontrolu
 ❓ /help - Bu mesaj
 
-🆕 **Desteklenen Coinler:**
-BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
+💰 **OKX Komutlari:**
+💵 /balance - Hesap bakiyesi
+📊 /positions - Acik pozisyonlar
+🔴 /stopokx - Trading durdur
+🟢 /startokx - Trading baslat
+
+🆕 **Desteklenen Coinler (13):**
+BTC, ETH, SOL, BNB, XRP, AVAX
+LTC, TRX, DOGE, SHIB, PEPE
+TRUMP, JUP
 
 ⏰ Auto-scan her 3 dakikada calisir
 """
@@ -824,7 +1177,15 @@ BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
 📡 /status - Bot durum kontrolu
 ❓ /help - Bu mesaj
 
-🆕 **Desteklenen Coinler:**
-BTC, ETH, SOL, LTC, BNB, SHIB, DOGE
+💰 **OKX Komutlari:**
+💵 /balance - Hesap bakiyesi
+📊 /positions - Acik pozisyonlar
+🔴 /stopokx - Trading durdur
+🟢 /startokx - Trading baslat
+
+🆕 **Desteklenen Coinler (13):**
+BTC, ETH, SOL, BNB, XRP, AVAX
+LTC, TRX, DOGE, SHIB, PEPE
+TRUMP, JUP
 """
         _telegram.send(fallback_help, chat_id=chat_id)

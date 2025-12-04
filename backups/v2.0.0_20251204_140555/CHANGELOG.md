@@ -1,37 +1,5 @@
 # T-TARS Changelog
 
-## v2.0.1 (2025-12-04)
-
-### 🔇 Sessiz Mod + OKX Pozisyon Takibi
-
-**Değişiklikler:**
-- Auto analyze (3dk) → SESSİZ çalışır, Telegram'a mesaj göndermez
-- Setup detected → SESSİZ, mesaj yok
-- /scan → SETUP DETECTED mesajı GÖNDERMEZ
-- /scan → Aktif Setup'lar yerine OKX GERÇEK POZİSYONLARI gösterir
-
-**Akış:**
-```
-Auto Analyze (3dk)
-     ↓
-Setup Bul → Tracking'e Kaydet [sessiz]
-     ↓
-OKX Order Aç [sessiz - sadece ORDER PLACED mesajı]
-     ↓
-Monitor (5dk) → TP/STOP olunca mesaj
-```
-
-**Telegram'a Gelen Mesajlar:**
-- ✅ ORDER PLACED (işlem açılınca)
-- ✅ TP1 HIT / TP2 HIT / STOP HIT (işlem kapanınca)
-- ❌ SETUP DETECTED (artık yok)
-
-### Dosya Değişiklikleri:
-- `main.py` - /analyze sessiz mod
-- `telegram_handlers.py` - /scan sessiz, OKX pozisyonları
-
----
-
 ## v2.0.0 (2025-12-04)
 
 ### 🚀 MAJOR: OKX API Entegrasyonu

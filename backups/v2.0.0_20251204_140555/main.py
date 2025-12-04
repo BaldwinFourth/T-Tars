@@ -39,8 +39,7 @@ from app.handlers.telegram_handlers import (
     handle_positions_command,
     handle_stopokx_command,
     handle_startokx_command,
-    is_trading_enabled,
-    execute_trade_for_setup
+    is_trading_enabled
 )
 import logging
 import sys
@@ -414,17 +413,16 @@ def monitor_setups():
 def auto_analyze():
     """
     Cloud Scheduler tarafından her 3 dakikada tetiklenen otomatik analiz
-    v2.0.1: 
-    - SESSİZ ÇALIŞIR - Telegram'a mesaj GÖNDERMEZ
-    - Setup bulunca OKX'te işlem açar
+    v1.4.10.3: 
     - Duplicate detection
+    - SETUP DETECTED mesajı GÖNDERİLMEZ (sessiz çalışır)
+    - Sadece tracking'e kaydeder
     """
     try:
         pairs = Config.AUTO_SCAN_PAIRS
         results = []
         total_setups = 0
         skipped_duplicates = 0
-        orders_placed = 0
         
         for pair in pairs:
             try:
@@ -441,7 +439,7 @@ def auto_analyze():
                         
                         entry_price = setup.get('entry_price', setup.get('current_price', market_data['current_price']))
                         
-                        # TRACKING KAYDI (sessiz)
+                        # TRACKING KAYDI (sessiz - mesaj yok)
                         try:
                             setup_id = tracking.log_setup({
                                 'pair': pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT'),
@@ -465,57 +463,27 @@ def auto_analyze():
                                 'risk_percent': 2.0
                             })
                             
-                            # Duplicate ise None döner - skip
+                            # v1.4.10.3: Duplicate ise None döner
                             if setup_id is None:
                                 skipped_duplicates += 1
                                 continue
                             
+                            # v1.4.10.3: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
+                            logger.info(f"✅ Setup #{setup_id} logged (entry: {format_price(entry_price)}) [silent]")
                             total_setups += 1
                             
-                            # v2.0.1: SETUP DETECTED mesajı GÖNDERME - sessiz çalış
-                            logger.info(f"✅ Setup #{setup_id[:8]} detected [silent]")
-                            
-                            # v2.0.1: OKX'te işlem aç (sessiz)
-                            if is_trading_enabled():
-                                clean_pair = pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')
-                                direction = setup.get('direction', 'LONG')
-                                
-                                trade_result = execute_trade_for_setup({
-                                    'pair': clean_pair,
-                                    'direction': direction,
-                                    'setup_type': setup['type'],
-                                    'timeframe': timeframe,
-                                    'setup_id': setup_id,
-                                    'entry_price': entry_price,
-                                    'stop_price': setup.get('stop_price', 0),
-                                    'tp1_price': setup.get('tp1_price', 0),
-                                    'tp2_price': setup.get('tp2_price', 0),
-                                    'confidence': setup.get('confidence', 'MEDIUM'),
-                                    'rr_ratio': setup.get('rr_ratio', 0)
-                                })
-                                
-                                if trade_result and trade_result.get('success'):
-                                    orders_placed += 1
-                                    logger.info(f"🚀 Order placed for {clean_pair}")
-                            
                         except Exception as track_error:
-                            logger.error(f"❌ Tracking/Trade failed: {track_error}")
+                            logger.error(f"❌ Tracking failed: {track_error}")
                     
-                    results.append(f"{pair}: {len(setups)} setup(s)")
+                    results.append(f"{pair}: {len(setups)} setup(s) found")
                 else:
                     results.append(f"{pair}: No setup")
             except Exception as e:
                 logger.error(f"Error analyzing {pair}: {e}")
                 results.append(f"{pair}: Error")
         
-        logger.info(f"✅ Auto analyze: {total_setups} setups, {orders_placed} orders, {skipped_duplicates} duplicates [silent]")
-        return jsonify({
-            "status": "success", 
-            "timestamp": get_turkey_time().isoformat(), 
-            "total_setups": total_setups, 
-            "orders_placed": orders_placed,
-            "skipped_duplicates": skipped_duplicates
-        })
+        logger.info(f"✅ Auto analyze completed: {total_setups} new setups, {skipped_duplicates} duplicates skipped [silent mode]")
+        return jsonify({"status": "success", "timestamp": get_turkey_time().isoformat(), "results": results, "total_setups": total_setups, "skipped_duplicates": skipped_duplicates})
     except Exception as e:
         logger.error(f"Auto analyze error: {e}")
         return jsonify({"error": str(e)}), 500

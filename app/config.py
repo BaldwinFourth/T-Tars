@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.0.0
+T-TARS Configuration v2.0.3
 ===========================
 
-v2.0.0:
-- OKX API credentials eklendi
+v2.0.3:
+- DEFAULT_LEVERAGE = 3 eklendi
+- MONITOR_INTERVAL_MINUTES = 3 (Düzeltildi)
+- OKX API credentials mevcut
 - OKX_TRADING_ENABLED flag (/stopokx, /startokx)
-- AUTO_SCAN_PAIRS genişletildi (13 coin)
-- BETA_GROUP kaldırıldı
 """
 
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.0.0"""
+    """T-TARS Configuration v2.0.3"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,7 +26,7 @@ class Config:
         with open(VERSION_FILE, 'r') as f:
             VERSION = f.read().strip()
     except FileNotFoundError:
-        VERSION = "2.0.0"  # Fallback
+        raise Exception("❌ VERSION dosyası bulunamadı!")
     
     # ============================================
     # TELEGRAM
@@ -34,14 +34,13 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
     
-    # v2.0.0: Beta group kaldırıldı - sadece ana chat
     @staticmethod
     def get_allowed_chats():
         """Get allowed chat IDs - sadece ana chat"""
         return [Config.TELEGRAM_CHAT_ID]
     
     # ============================================
-    # OKX API (v2.0.0 - YENİ)
+    # OKX API
     # ============================================
     OKX_API_KEY = os.getenv('OKX_API_KEY', '')
     OKX_SECRET_KEY = os.getenv('OKX_SECRET_KEY', '')
@@ -49,8 +48,10 @@ class Config:
     OKX_DEMO_MODE = os.getenv('OKX_DEMO_MODE', 'false').lower() == 'true'
     
     # Trading ON/OFF switch (/stopokx, /startokx)
-    # Cloud Storage'da flag tutulacak veya ENV
     OKX_TRADING_ENABLED = os.getenv('OKX_TRADING_ENABLED', 'true').lower() == 'true'
+
+    # v2.0.3: Default Leverage (3x)
+    DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '3'))
     
     # ============================================
     # CLAUDE AI
@@ -74,76 +75,43 @@ class Config:
     # TRADING PAIRS
     # ============================================
     
-    # v2.0.0: Auto-scan genişletildi (13 coin)
+    # Auto-scan listesi (13 coin)
     AUTO_SCAN_PAIRS = [
-        # Majors
-        'BTC/USDT:USDT',
-        'ETH/USDT:USDT',
-        'SOL/USDT:USDT',
-        
-        # Large caps
-        'BNB/USDT:USDT',
-        'XRP/USDT:USDT',
-        'AVAX/USDT:USDT',
-        'LTC/USDT:USDT',
-        'TRX/USDT:USDT',
-        
-        # Meme / Trending
-        'DOGE/USDT:USDT',
-        'SHIB/USDT:USDT',
-        'PEPE/USDT:USDT',
-        'TRUMP/USDT:USDT',
-        'JUP/USDT:USDT',
+        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
+        'BNB/USDT:USDT', 'XRP/USDT:USDT', 'AVAX/USDT:USDT', 
+        'LTC/USDT:USDT', 'TRX/USDT:USDT', 'DOGE/USDT:USDT', 
+        'SHIB/USDT:USDT', 'PEPE/USDT:USDT', 'TRUMP/USDT:USDT', 
+        'JUP/USDT:USDT', 'PUMP/USDT:USDT'
     ]
     
-    # Manuel /plan için - Desteklenen tüm pariteler
+    # Manuel /plan için
     MANUAL_PAIRS = [
-        # Majors
-        'BTC/USDT:USDT',
-        'ETH/USDT:USDT',
-        'SOL/USDT:USDT',
+        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
+        'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 
+        'TRUMP/USDT:USDT', 'JUP/USDT:USDT', 'AVAX/USDT:USDT', 
+        'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
+        'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
+        'PUMP/USDT:USDT', 'BCH/USDT:USDT', 'PUMP/USDT:USDT'
         
-        # Alts - Perpetual
-        'LTC/USDT:USDT',
-        'XRP/USDT:USDT',
-        'DOGE/USDT:USDT',
-        'TRUMP/USDT:USDT',
-        'JUP/USDT:USDT',
-        'AVAX/USDT:USDT',
-        'SHIB/USDT:USDT',
-        'BNB/USDT:USDT',
-        'HYPE/USDT:USDT',
-        'TRX/USDT:USDT',
-        'SUI/USDT:USDT',
-        'PEPE/USDT:USDT',
-        'PUMP/USDT:USDT',
-        'LINEA/USDT:USDT',
-        'BCH/USDT:USDT',
-        
-        # Spot
-        'LSK/USDT'
     ]
     
     # ============================================
     # RISK MANAGEMENT
     # ============================================
-    RISK_PER_TRADE_MIN = float(os.getenv('RISK_PER_TRADE_MIN', '1.0'))  # %1
-    RISK_PER_TRADE_MAX = float(os.getenv('RISK_PER_TRADE_MAX', '2.0'))  # %2
-    DEFAULT_BALANCE = float(os.getenv('DEFAULT_BALANCE', '1000'))  # $1000 default
+    RISK_PER_TRADE_MIN = float(os.getenv('RISK_PER_TRADE_MIN', '1.0'))
+    RISK_PER_TRADE_MAX = float(os.getenv('RISK_PER_TRADE_MAX', '2.0'))
+    DEFAULT_BALANCE = float(os.getenv('DEFAULT_BALANCE', '1000'))
     
-    # v2.0.0: Position limits
-    MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', '100'))  # Max $100 per position
-    MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '50'))  # Max $50 daily loss
-    MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '5'))  # Max 5 parallel positions
-    
-    # ============================================
-    # MONITORING
-    # ============================================
-    MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))
+    # Position limits
+    MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', '100'))
+    MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '50'))
+    MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '5'))
     
     # ============================================
-    # SERVER
+    # MONITORING & SERVER
     # ============================================
+    # v2.0.3: Monitor süresi 3 dakika
+    MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '3'))
     PORT = int(os.getenv('PORT', '8080'))
     
     # ============================================
@@ -152,17 +120,10 @@ class Config:
     @staticmethod
     def validate():
         """Validate required configuration"""
-        required = [
-            'ANTHROPIC_API_KEY',
-            'TELEGRAM_BOT_TOKEN',
-            'TELEGRAM_CHAT_ID'
-        ]
-        
+        required = ['ANTHROPIC_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
         missing = [key for key in required if not getattr(Config, key)]
-        
         if missing:
             raise ValueError(f"Missing required config: {', '.join(missing)}")
-        
         return True
     
     @staticmethod
@@ -170,34 +131,18 @@ class Config:
         """Validate OKX API configuration"""
         required = ['OKX_API_KEY', 'OKX_SECRET_KEY', 'OKX_PASSPHRASE']
         missing = [key for key in required if not getattr(Config, key)]
-        
         if missing:
             return False, f"Missing OKX config: {', '.join(missing)}"
-        
         return True, "OKX config OK"
     
     @staticmethod
     def get_pair_symbol(ticker):
-        """
-        Convert user input to OKX format
-        Examples:
-        - btcusdt → BTC/USDT:USDT
-        - ETHUSDT → ETH/USDT:USDT
-        - lskusdt → LSK/USDT (spot)
-        """
+        """Convert user input to OKX format"""
         ticker = ticker.upper().replace('USDT', '')
-        
-        # Spot pairs
-        if ticker in ['LSK']:
-            return f'{ticker}/USDT'
-        
-        # Perpetual (default)
+        if ticker in ['LSK']: return f'{ticker}/USDT'
         return f'{ticker}/USDT:USDT'
     
     @staticmethod
     def get_clean_pair(okx_pair):
-        """
-        OKX formatından temiz parite adı al
-        BTC/USDT:USDT → BTCUSDT
-        """
+        """OKX formatından temiz parite adı al"""
         return okx_pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')

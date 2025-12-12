@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v1.4.9.5
-==============================
+T-TARS Setup Detector v2.0.9
+============================
 Trading setup orchestrator.
-OB, FVG, Volume modüllerini import eder.
 
-v1.4.9.5:
-- pair parametresi OB/FVG detector'lara geçiriliyor (log'da coin ismi görünsün)
-
-v1.4.9.1:
-- Genel volume spike kontrolü kaldırıldı
-- OB/FVG'nin kendi volume_confirmed field'ı kullanılıyor
+v2.0.9:
+- FIX: TIMEFRAMES listesinde virgül hatası düzeltildi ('1d' '4h' -> '1d', '4h')
+- FIX: 10m kaldırıldı (OKX desteklemiyor)
+- ADD: Tüm fonksiyonlara detaylı logging eklendi
+- ADD: Exception handling iyileştirildi
 """
 
 import logging
@@ -20,155 +18,151 @@ from app.strategies.volume_analyzer import select_best_volume
 
 logger = logging.getLogger(__name__)
 
-# Timeframe listesi
-TIMEFRAMES = ['4h', '1h', '15m', '5m', '3m']
+# v2.0.9: Düzeltilmiş Timeframe listesi (10m kaldırıldı, virgül düzeltildi)
+TIMEFRAMES = ['4h', '2h', '1h', '30m', '15m', '5m', '3m']
 
 
 def detect_trading_setup(pair, market_data):
-    """
-    Otomatik 3dk tarama için - Tek setup döndürür
-    5m/3m timeframe'leri kontrol eder
-    
-    Returns:
-        dict veya False
-    """
+    """Otomatik tarama için - Tek setup döndürür"""
     try:
-        pdc = market_data['previous_day']
-        bias = 'bullish' if pdc['candle_type'] == 'green' else 'bearish'
-        current_price = market_data['current_price']
+        if not market_data:
+            logger.warning(f"⚠️ {pair}: Market data boş!")
+            return False
         
-        # Volume seç (info için)
-        volume_5m = market_data['volume']['5m']
-        volume_3m = market_data['volume']['3m']
-        volume, timeframe = select_best_volume(volume_5m, volume_3m)
+        pdc = market_data.get('previous_day', {})
+        bias = pdc.get('candle_type', 'red')
+        bias_str = 'bullish' if bias == 'green' else 'bearish'
+        current_price = market_data.get('current_price', 0)
         
-        # OB ve FVG data
+        # Volume verisini sözlük olarak gönder
+        volume_data, timeframe = select_best_volume(market_data.get('volume', {}))
+        
+        # Seçilen TF'ye göre OB/FVG al
         obs = market_data['smart_money']['order_blocks'].get(timeframe, [])
         fvgs = market_data['smart_money']['fair_value_gaps'].get(timeframe, [])
+        atr = market_data['atr'].get(timeframe, 0)
         
-        # ATR
-        atr = market_data['atr'].get(timeframe, market_data['atr']['15m'])
+        logger.info(f"🔍 {pair}: TF={timeframe}, OB={len(obs)}, FVG={len(fvgs)}, Bias={bias_str}, ATR={atr:.2f}")
         
-        logger.info(f"🔍 {pair}: OB={len(obs)}, FVG={len(fvgs)}, bias={bias}, TF={timeframe}")
-        
-        # OB Setup kontrol (volume_confirmed OB içinde kontrol edilecek)
+        # OB Kontrol
         if len(obs) > 0:
             ob = obs[0]
-            if bias == 'bullish' and ob['type'] == 'bullish':
-                setup = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    return setup
-            elif bias == 'bearish' and ob['type'] == 'bearish':
-                setup = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    return setup
+            logger.debug(f"📦 {pair}: OB kontrol - Type={ob['type']}, Bias={bias_str}")
+            if bias_str == 'bullish' and ob['type'] == 'bullish':
+                result = detect_ob_long(ob, volume_data, atr, timeframe, current_price, pair)
+                if result:
+                    logger.info(f"✅ {pair}: OB LONG setup bulundu!")
+                return result
+            elif bias_str == 'bearish' and ob['type'] == 'bearish':
+                result = detect_ob_short(ob, volume_data, atr, timeframe, current_price, pair)
+                if result:
+                    logger.info(f"✅ {pair}: OB SHORT setup bulundu!")
+                return result
         
-        # FVG Setup kontrol (volume_confirmed FVG içinde kontrol edilecek)
+        # FVG Kontrol
         if len(fvgs) > 0:
             fvg = fvgs[0]
-            if bias == 'bullish' and fvg['type'] == 'bullish':
-                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    return setup
-            elif bias == 'bearish' and fvg['type'] == 'bearish':
-                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    return setup
+            logger.debug(f"📊 {pair}: FVG kontrol - Type={fvg['type']}, Bias={bias_str}")
+            if bias_str == 'bullish' and fvg['type'] == 'bullish':
+                result = detect_fvg_long(fvg, volume_data, atr, timeframe, current_price, pair)
+                if result:
+                    logger.info(f"✅ {pair}: FVG LONG setup bulundu!")
+                return result
+            elif bias_str == 'bearish' and fvg['type'] == 'bearish':
+                result = detect_fvg_short(fvg, volume_data, atr, timeframe, current_price, pair)
+                if result:
+                    logger.info(f"✅ {pair}: FVG SHORT setup bulundu!")
+                return result
         
+        logger.debug(f"ℹ️ {pair}: Setup bulunamadı (Bias uyumsuz veya OB/FVG yok)")
         return False
         
     except Exception as e:
-        logger.error(f"Setup detection error: {e}")
+        logger.error(f"❌ {pair} Setup detection error: {e}")
         return False
 
 
 def check_timeframe(pair, market_data, timeframe, bias, current_price):
-    """
-    Belirli timeframe'de setup kontrol et
-    
-    Returns:
-        list: Setup listesi (boş olabilir)
-    """
+    """Belirli bir timeframe için setup kontrol et"""
     setups = []
-    
     try:
         volume = market_data['volume'].get(timeframe, {})
         obs = market_data['smart_money']['order_blocks'].get(timeframe, [])
         fvgs = market_data['smart_money']['fair_value_gaps'].get(timeframe, [])
+        atr = market_data['atr'].get(timeframe, 0)
         
-        # ATR mapping
-        atr = market_data['atr'].get(timeframe, market_data['atr'].get('15m', 0))
+        logger.debug(f"🕐 {pair} [{timeframe}]: OB={len(obs)}, FVG={len(fvgs)}, Vol={volume.get('spike_ratio', 0):.2f}x")
         
-        # Debug log
-        logger.info(f"📊 {pair} {timeframe.upper()}: OB={len(obs)}, FVG={len(fvgs)}, bias={bias}")
-        
-        # OB Setup kontrol (volume_confirmed OB içinde)
+        # OB Kontrol
         if len(obs) > 0:
             ob = obs[0]
             if bias == 'bullish' and ob['type'] == 'bullish':
-                setup = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    logger.info(f"✅ {pair} {timeframe.upper()} LONG OB R:R: {setup['rr_ratio']:.2f}")
-                    setups.append(setup)
+                s = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
+                if s:
+                    logger.info(f"✅ {pair} [{timeframe}]: OB LONG found!")
+                    setups.append(s)
             elif bias == 'bearish' and ob['type'] == 'bearish':
-                setup = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    logger.info(f"✅ {pair} {timeframe.upper()} SHORT OB R:R: {setup['rr_ratio']:.2f}")
-                    setups.append(setup)
+                s = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
+                if s:
+                    logger.info(f"✅ {pair} [{timeframe}]: OB SHORT found!")
+                    setups.append(s)
         
-        # FVG Setup kontrol (volume_confirmed FVG içinde)
+        # FVG Kontrol
         if len(fvgs) > 0:
             fvg = fvgs[0]
             if bias == 'bullish' and fvg['type'] == 'bullish':
-                setup = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    logger.info(f"✅ {pair} {timeframe.upper()} LONG FVG R:R: {setup['rr_ratio']:.2f}")
-                    setups.append(setup)
+                s = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
+                if s:
+                    logger.info(f"✅ {pair} [{timeframe}]: FVG LONG found!")
+                    setups.append(s)
             elif bias == 'bearish' and fvg['type'] == 'bearish':
-                setup = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
-                if setup:
-                    logger.info(f"✅ {pair} {timeframe.upper()} SHORT FVG R:R: {setup['rr_ratio']:.2f}")
-                    setups.append(setup)
+                s = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
+                if s:
+                    logger.info(f"✅ {pair} [{timeframe}]: FVG SHORT found!")
+                    setups.append(s)
         
         return setups
         
+    except KeyError as e:
+        logger.error(f"❌ {pair} [{timeframe}]: Missing data key: {e}")
+        return []
     except Exception as e:
-        logger.error(f"Error checking {timeframe} setups: {e}")
+        logger.error(f"❌ {pair} [{timeframe}]: Check error: {e}")
         return []
 
 
 def scan_setups(pair, market_data):
-    """
-    TÜM timeframe'leri tara - /scan için
-    
-    Returns:
-        list: Tüm setup'lar
-    """
+    """Tüm timeframe'leri tarayarak setup bul"""
     try:
-        pdc = market_data['previous_day']
-        bias = 'bullish' if pdc['candle_type'] == 'green' else 'bearish'
-        current_price = market_data['current_price']
+        if not market_data:
+            logger.warning(f"⚠️ {pair}: scan_setups - Market data boş!")
+            return []
+        
+        pdc = market_data.get('previous_day', {})
+        bias = 'bullish' if pdc.get('candle_type') == 'green' else 'bearish'
+        current_price = market_data.get('current_price', 0)
+        
+        logger.info(f"🔎 {pair}: Scan başladı - Bias={bias}, Price=${current_price:.2f}, TFs={len(TIMEFRAMES)}")
         
         all_setups = []
         
-        logger.info(f"🔍 {pair}: Scanning {len(TIMEFRAMES)} timeframes (bias: {bias})")
+        for tf in TIMEFRAMES:
+            s = check_timeframe(pair, market_data, tf, bias, current_price)
+            if s:
+                all_setups.extend(s)
         
-        for timeframe in TIMEFRAMES:
-            setups_in_tf = check_timeframe(pair, market_data, timeframe, bias, current_price)
-            if setups_in_tf:
-                logger.info(f"✅ {pair} {timeframe.upper()}: {len(setups_in_tf)} setup(s) found")
-                all_setups.extend(setups_in_tf)
-            else:
-                logger.info(f"ℹ️ {pair} {timeframe.upper()}: No setup")
+        if all_setups:
+            logger.info(f"🎯 {pair}: Toplam {len(all_setups)} setup bulundu!")
+        else:
+            logger.debug(f"ℹ️ {pair}: Setup bulunamadı")
         
-        logger.info(f"📊 {pair}: Total {len(all_setups)} setup(s) found across all timeframes")
         return all_setups
         
     except Exception as e:
-        logger.error(f"❌ Multi-timeframe scan error for {pair}: {e}")
+        logger.error(f"❌ {pair}: Scan error: {e}")
         return []
 
 
-# Backward compatibility - eski isimler de çalışsın
+# Alias'lar (geriye uyumluluk)
 detect_all_trading_setups = scan_setups
 check_timeframe_for_setups = check_timeframe

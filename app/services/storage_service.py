@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Storage Service v1.4.9.3
-===============================
+T-TARS Storage Service v2.0.3
+=============================
 Google Cloud Storage service for templates.
+
+v2.0.3:
+- Sürüm güncellemesi (Mantıksal değişiklik yok)
 
 v1.4.9.3:
 - _clean_markdown: telegram markdown fix (→, <, $ karakterleri)

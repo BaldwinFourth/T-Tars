@@ -1,60 +1,61 @@
-# T-TARS CHANGELOG
+# T-TARS Trading Bot - CHANGELOG
 
-## v2.0.2 - 2024-12-04
+## [2.1.2] - 2025-12-11
 
-### 🔧 OKX Order Execution Fix
+### Changed
+- **Market Order -> Limit Order**: Artik limit emir kullaniliyor
+  - Daha dusuk komisyon (Maker fee < Taker fee)
+  - Slippage yok (tam istenen fiyattan giris)
+  - Setup entry fiyati korunuyor
 
-**Problem:** Bot setup buluyordu ama OKX'te işlem açamıyordu.
-
-**Kök Nedenler:**
-1. Leverage ayarlanmıyordu
-2. `posSide` parametresi eksikti (one-way mode için `net` gerekli)
-3. Amount hesabı yanlıştı (USD vs kontrat)
-4. Setup'larda `direction` field'ı yoktu
-
-**Düzeltmeler:**
-
-- **okx_service.py:**
-  - `set_leverage()` fonksiyonu eklendi
-  - `posSide: 'net'` eklendi (one-way mode)
-  - `calculate_contracts()` fonksiyonu eklendi (USD → kontrat çevirme)
-  - `get_contract_size()` fonksiyonu eklendi
-  - `place_order_with_tp_sl()` düzeltildi: entry_price parametresi, leverage set
-
-- **ob_detector.py & fvg_detector.py:**
-  - `direction` field eklendi: `'LONG'` veya `'SHORT'`
-
-- **telegram_handlers.py:**
-  - `execute_trade_for_setup()` düzeltildi
-  - Direction artık setup'tan alınıyor
-  - entry_price OKX'e geçiriliyor
+### Fixed
+- **OKX TP/SL Error 51000**: Parameter ordType hatasi duzeltildi
+  - Flat parametreler yerine `attachAlgoOrds` array kullaniliyor
+  - OKX API v5 standardi uyguland
+  - `tpTriggerPxType` ve `slTriggerPxType` eklendi ('last')
 
 ### Technical Details
-- Leverage: 10x (default, isolated margin)
-- Position mode: One-way (posSide: 'net')
-- Order type: Market with TP/SL
-- Amount: Otomatik USD → kontrat çevirme
+```python
+# ESKI (v2.1.1 - Market)
+order = exchange.create_order(
+    type='market',
+    ...
+)
+
+# YENI (v2.1.2 - Limit)
+order = exchange.create_order(
+    type='limit',
+    price=entry_price,
+    params={
+        'attachAlgoOrds': [{
+            'tpTriggerPx': str(tp),
+            'tpOrdPx': '-1',
+            'tpTriggerPxType': 'last',
+            'slTriggerPx': str(sl),
+            'slOrdPx': '-1',
+            'slTriggerPxType': 'last'
+        }]
+    }
+)
+```
+
+### Changed Files
+- `app/services/okx_service.py`
 
 ---
 
-## v2.0.1 - 2024-12-04
+## [2.1.1] - 2025-12-10
 
-### 🔇 Silent Mode
-
-- `/analyze` endpoint sessiz çalışır (Telegram mesajı göndermez)
-- SETUP DETECTED mesajları kaldırıldı
-- `/scan` OKX gerçek pozisyonlarını gösterir
+### Fixed
+- tdMode 'isolated' -> 'cross' (Cross Margin)
+- 'hedged' parametresi kaldirildi
+- close_position'da da cross mode
 
 ---
 
-## v2.0.0 - 2024-12-04
+## [2.1.0] - 2025-12-10
 
-### 🚀 OKX Trade Execution
-
-- **YENİ:** OKX API entegrasyonu
-- **YENİ:** `/balance` - Hesap bakiyesi
-- **YENİ:** `/positions` - Açık pozisyonlar
-- **YENİ:** `/stopokx` - Trading durdur
-- **YENİ:** `/startokx` - Trading başlat
-- Auto-scan: 13 coin desteği
-- Risk management: Max $100/position, Max $50/day loss
+### Added
+- Real balance integration
+- Detailed /score reporting
+- Monitor emoji mapping

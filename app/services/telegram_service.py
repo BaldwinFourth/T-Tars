@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Service v2.0.0
+T-TARS Telegram Service v2.0.3
 ==============================
 Telegram Bot API wrapper
+
+v2.0.3:
+- Sürüm güncellemesi (Mantıksal değişiklik yok)
 
 v2.0.0:
 - broadcast() kaldırıldı

@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+T-TARS Claude Service v2.0.3
+============================
+Claude AI API wrapper for market analysis.
+
+v2.0.3:
+- Sürüm güncellemesi (Mantıksal değişiklik yok)
+"""
+
 from anthropic import Anthropic
 from app.config import Config
 import logging

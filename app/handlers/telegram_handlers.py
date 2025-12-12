@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.1.1
+T-TARS Telegram Handlers v2.1.3
 ================================
 Telegram bot komut handler'ları.
+
+v2.1.3:
+- REMOVED: execute_trade_for_setup'tan risk hesabi kaldirildi
+- CHANGED: Risk hesabi artik okx_service.py'de yapiliyor
+- CHANGED: setup_data direkt okx_service'e geciriliyor
 
 v2.1.1:
 - NEW: /score detaylı rapor formatı (Top/Worst 5 coin & TF)
@@ -52,7 +57,7 @@ def init_handlers(telegram, okx, claude, storage, tracking):
     _storage = storage
     _tracking = tracking
     _trading_enabled = getattr(Config, 'OKX_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.1.1) - Trading: {_trading_enabled}")
+    logger.info(f"✅ Telegram handlers initialized (v2.1.3) - Trading: {_trading_enabled}")
 
 # --------------------------
 # BEST TF SEÇİCİ
@@ -443,9 +448,14 @@ def is_trading_enabled():
     return _trading_enabled
 
 def execute_trade_for_setup(setup_data, chat_id=None):
-    """v2.1.0: Güvenli Trade Execution - Parametre fix"""
+    """
+    v2.1.3: Sadeleştirilmiş Trade Execution
+    - Risk hesabi okx_service.py'de yapiliyor
+    - Sadece setup bilgilerini gecirir
+    """
     try:
-        if not _trading_enabled: return {'success': False, 'reason': 'disabled'}
+        if not _trading_enabled:
+            return {'success': False, 'reason': 'disabled'}
         
         pair = setup_data.get('pair', '')
         direction = setup_data.get('direction', 'LONG')
@@ -453,29 +463,23 @@ def execute_trade_for_setup(setup_data, chat_id=None):
         stop = float(setup_data.get('stop_price', 0))
         tp1 = float(setup_data.get('tp1_price', 0))
         
-        bal = _okx.get_balance()
-        if not bal.get('success'): return {'success': False, 'reason': 'balance_error'}
-        
-        risk_amt = float(bal['free']) * 0.02
-        dist_pct = abs(entry - stop) / entry if entry > 0 else 0.01
-        size_usd = risk_amt / dist_pct if dist_pct > 0 else 10.0
-        
-        size_usd = min(size_usd, float(Config.MAX_POSITION_SIZE))
-        
+        # v2.1.3: Risk hesabi artik okx_service'te
+        # Sadece setup bilgilerini gecir
         res = _okx.place_order_with_tp_sl(
             symbol=pair.replace('USDT', '/USDT:USDT') if '/' not in pair else pair,
             side='buy' if direction == 'LONG' else 'sell',
-            amount_usd=size_usd,
-            tp_price=tp1,
-            sl_price=stop,
-            entry_price=entry
+            entry_price=entry,
+            stop_price=stop,
+            tp_price=tp1
         )
         
         if res.get('success'):
-            if chat_id: _telegram.send(f"🚀 İşlem Açıldı: {pair} {direction}", chat_id=chat_id)
+            if chat_id:
+                _telegram.send(f"🚀 İşlem Açıldı: {pair} {direction}", chat_id=chat_id)
             return {'success': True}
         else:
-            if chat_id: _telegram.send(f"❌ İşlem Hatası: {res.get('error')}", chat_id=chat_id)
+            if chat_id:
+                _telegram.send(f"❌ İşlem Hatası: {res.get('error')}", chat_id=chat_id)
             return {'success': False, 'reason': res.get('error')}
             
     except Exception as e:

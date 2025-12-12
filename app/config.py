@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.0.3
+T-TARS Configuration v2.1.3
 ===========================
+
+v2.1.3:
+- REMOVED: MAX_POSITION_SIZE (risk hesabi artik okx_service'te)
+- REMOVED: RISK_PER_TRADE_MIN/MAX -> tek RISK_PER_TRADE
+- REMOVED: DEFAULT_BALANCE (gercek bakiye OKX'ten alinacak)
+- NOTE: Risk hesabi okx_service.py tarafindan yapiliyor
 
 v2.0.3:
 - DEFAULT_LEVERAGE = 3 eklendi
@@ -15,7 +21,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.0.3"""
+    """T-TARS Configuration v2.1.3"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -51,7 +57,7 @@ class Config:
     OKX_TRADING_ENABLED = os.getenv('OKX_TRADING_ENABLED', 'true').lower() == 'true'
 
     # v2.0.3: Default Leverage (3x)
-    DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '3'))
+    DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '20'))
     
     # ============================================
     # CLAUDE AI
@@ -75,7 +81,7 @@ class Config:
     # TRADING PAIRS
     # ============================================
     
-    # Auto-scan listesi (13 coin)
+    # Auto-scan listesi (14 coin)
     AUTO_SCAN_PAIRS = [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
         'BNB/USDT:USDT', 'XRP/USDT:USDT', 'AVAX/USDT:USDT', 
@@ -91,19 +97,16 @@ class Config:
         'TRUMP/USDT:USDT', 'JUP/USDT:USDT', 'AVAX/USDT:USDT', 
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
-        'PUMP/USDT:USDT', 'BCH/USDT:USDT', 'PUMP/USDT:USDT'
-        
+        'PUMP/USDT:USDT', 'BCH/USDT:USDT'
     ]
     
     # ============================================
     # RISK MANAGEMENT
     # ============================================
-    RISK_PER_TRADE_MIN = float(os.getenv('RISK_PER_TRADE_MIN', '1.0'))
-    RISK_PER_TRADE_MAX = float(os.getenv('RISK_PER_TRADE_MAX', '2.0'))
-    DEFAULT_BALANCE = float(os.getenv('DEFAULT_BALANCE', '1000'))
+    # v2.1.3: Risk hesabi okx_service.py'de yapiliyor
+    RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # %1 risk (default)
     
-    # Position limits
-    MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', '100'))
+    # Safety limits
     MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '50'))
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '5'))
     

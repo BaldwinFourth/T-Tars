@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OKX Service v2.1.2
+T-TARS OKX Service v2.1.3
 =========================
 OKX Exchange Service
+
+v2.1.3:
+- NEW: Risk bazli pozisyon hesaplama (gercek bakiye x RISK_PER_TRADE)
+- NEW: Pending order kontrolu (ayni coin'de bekleyen emir varsa skip)
+- NEW: Acik pozisyon kontrolu (ayni coin'de pozisyon varsa skip)
+- FIX: Scientific notation fix (kucuk fiyatli coinler icin)
+- CHANGED: place_order_with_tp_sl artik amount_usd almıyor, risk otomatik
 
 v2.1.2:
 - NEW: Market -> Limit emir (daha dusuk komisyon, slippage yok)
@@ -12,9 +19,6 @@ v2.1.2:
 v2.1.1:
 - FIX: tdMode 'isolated' -> 'cross' (Cross Margin)
 - FIX: 'hedged' parametresi kaldirildi (OKX API hatasi)
-
-v2.0.9:
-- 10m timeframe kaldirildi (OKX desteklemiyor)
 """
 
 import ccxt
@@ -30,8 +34,19 @@ logger = logging.getLogger(__name__)
 def get_turkey_time():
     return datetime.now(TURKEY_TZ)
 
+
+def format_price_string(price):
+    """
+    v2.1.3: Scientific notation fix
+    Kucuk fiyatli coinlerde 1.23e-05 yerine 0.0000123 formatinda string dondurur
+    """
+    if price is None or price == 0:
+        return "0"
+    return f"{float(price):.10f}".rstrip('0').rstrip('.')
+
+
 class OKXService:
-    """OKX Borsa Servisi - v2.1.2 (Limit Order + attachAlgoOrds)"""
+    """OKX Borsa Servisi - v2.1.3 (Risk Bazli + Duplicate Kontrol)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d',
@@ -77,7 +92,7 @@ class OKXService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"OKX Servisi v2.1.2 Hazir (Lev: {Config.DEFAULT_LEVERAGE}x, Mode: CROSS, Order: LIMIT)")
+            logger.info(f"OKX Servisi v2.1.3 Hazir (Lev: {Config.DEFAULT_LEVERAGE}x, Risk: %{Config.RISK_PER_TRADE}, Mode: CROSS)")
 
         except Exception as e:
             logger.error(f"OKX Başlatma Hatası: {e}")
@@ -112,7 +127,6 @@ class OKXService:
         try:
             symbol = self._normalize_symbol(symbol)
             lev = leverage or Config.DEFAULT_LEVERAGE
-            # v2.1.1: Cross margin için leverage ayarı
             self.exchange.set_leverage(lev, symbol, params={'mgnMode': 'cross', 'posSide': 'long'})
             self.exchange.set_leverage(lev, symbol, params={'mgnMode': 'cross', 'posSide': 'short'})
             return {'success': True}
@@ -318,10 +332,45 @@ class OKXService:
             return None
 
     # ============================================
-    # ORDER METHODS - v2.1.2 LIMIT + attachAlgoOrds
+    # ORDER METHODS - v2.1.3 RISK BAZLI
     # ============================================
     
+    def has_pending_orders(self, symbol):
+        """
+        v2.1.3: Bekleyen emir kontrolu
+        Ayni symbol'de acik limit emir varsa True doner
+        """
+        try:
+            symbol = self._normalize_symbol(symbol)
+            open_orders = self.exchange.fetch_open_orders(symbol)
+            if open_orders and len(open_orders) > 0:
+                logger.info(f"⏳ {symbol}: {len(open_orders)} bekleyen emir var")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Pending order check error: {e}")
+            return False
+    
+    def has_open_position(self, symbol):
+        """
+        v2.1.3: Acik pozisyon kontrolu
+        Ayni symbol'de acik pozisyon varsa True doner
+        """
+        try:
+            symbol = self._normalize_symbol(symbol)
+            positions = self.get_positions(symbol)
+            if positions and len(positions) > 0:
+                for pos in positions:
+                    if float(pos.get('contracts', 0)) > 0:
+                        logger.info(f"📊 {symbol}: Açık pozisyon var ({pos['side']})")
+                        return True
+            return False
+        except Exception as e:
+            logger.error(f"Position check error: {e}")
+            return False
+
     def calculate_contracts(self, symbol, usd_amount, current_price):
+        """Kontrat hesaplama (degismedi)"""
         try:
             market = self.exchange.market(symbol)
             contract_value = market['contractSize']
@@ -333,71 +382,150 @@ class OKXService:
             contracts_needed = usd_amount / notional_per_contract
             contracts_final = max(1, round(contracts_needed))
             
-            logger.info(f"🧮 {symbol}: ${usd_amount} / (${notional_per_contract:.2f}/kontrat) = {contracts_final} kontrat")
+            logger.info(f"🧮 {symbol}: ${usd_amount:.2f} / (${notional_per_contract:.4f}/kontrat) = {contracts_final} kontrat")
             return int(contracts_final)
             
         except Exception as e:
             logger.error(f"Kontrat Hesaplama Hatası: {e}")
             return 1
 
-    def place_order_with_tp_sl(self, symbol, side, amount_usd, tp_price=None, sl_price=None, entry_price=None):
+    def calculate_position_size(self, entry_price, stop_price):
         """
-        v2.1.2: LIMIT Order + attachAlgoOrds (OKX API v5)
-        - Limit emir: Daha dusuk komisyon (maker fee), slippage yok
-        - attachAlgoOrds: TP/SL dogru formatta gonderiliyor
+        v2.1.3: Risk bazli pozisyon boyutu hesaplama
+        
+        Formul:
+        - Risk Amount = Balance × RISK_PER_TRADE%
+        - Stop Distance = |Entry - Stop| / Entry
+        - Position Size = Risk Amount / Stop Distance
+        
+        Ornek:
+        - Balance: $2000, Risk: %1 = $20
+        - Entry: 100, Stop: 99 (mesafe: %1)
+        - Position = $20 / 0.01 = $2000
+        """
+        try:
+            # 1. Gercek bakiye al
+            balance = self.get_balance()
+            if not balance.get('success'):
+                logger.error("❌ Bakiye alinamadi, fallback $500")
+                real_balance = 500.0
+            else:
+                real_balance = float(balance['free'])
+            
+            # 2. Risk miktari hesapla
+            risk_percent = Config.RISK_PER_TRADE / 100  # 1.0 -> 0.01
+            risk_amount = real_balance * risk_percent
+            
+            # 3. Stop mesafesi hesapla
+            stop_distance = abs(entry_price - stop_price)
+            stop_distance_pct = stop_distance / entry_price if entry_price > 0 else 0.01
+            
+            # 4. Pozisyon boyutu
+            if stop_distance_pct > 0:
+                position_size = risk_amount / stop_distance_pct
+            else:
+                position_size = risk_amount * 10  # Fallback
+            
+            logger.info(f"📐 Risk Hesabi: Bakiye=${real_balance:.2f}, Risk%={Config.RISK_PER_TRADE}, "
+                       f"Risk$={risk_amount:.2f}, StopDist={stop_distance_pct:.4%}, Pozisyon=${position_size:.2f}")
+            
+            return position_size
+            
+        except Exception as e:
+            logger.error(f"Position size hesaplama hatasi: {e}")
+            return 100.0  # Fallback
+
+    def place_order_with_tp_sl(self, symbol, side, entry_price, stop_price, tp_price=None):
+        """
+        v2.1.3: Risk Bazli LIMIT Order + attachAlgoOrds
+        
+        Degisiklikler:
+        - amount_usd parametresi KALDIRILDI
+        - Risk otomatik hesaplaniyor (bakiye x RISK_PER_TRADE%)
+        - Pending order kontrolu eklendi
+        - Acik pozisyon kontrolu eklendi
+        - Scientific notation fix eklendi
         """
         self._require_auth()
         try:
             symbol = self._normalize_symbol(symbol)
+            coin_name = symbol.replace('/USDT:USDT', '')
+            
+            # v2.1.3: Pending order kontrolu
+            if self.has_pending_orders(symbol):
+                msg = f"⏳ {coin_name}: Bekleyen emir var, yeni emir ATLANACAK"
+                logger.warning(msg)
+                return {'success': False, 'error': msg, 'reason': 'pending_order_exists'}
+            
+            # v2.1.3: Acik pozisyon kontrolu
+            if self.has_open_position(symbol):
+                msg = f"📊 {coin_name}: Açık pozisyon var, yeni emir ATLANACAK"
+                logger.warning(msg)
+                return {'success': False, 'error': msg, 'reason': 'position_exists'}
+            
+            # Leverage ayarla
             self.set_leverage(symbol)
             
-            # Entry price ZORUNLU (limit order icin)
-            if not entry_price:
-                ticker = self.exchange.fetch_ticker(symbol)
-                entry_price = ticker['last']
-                logger.warning(f"⚠️ Entry price verilmedi, current price kullaniliyor: {entry_price}")
-
-            contracts = self.calculate_contracts(symbol, amount_usd, entry_price)
+            # v2.1.3: Risk bazli pozisyon boyutu
+            position_usd = self.calculate_position_size(entry_price, stop_price)
+            
+            # Kontrat hesapla
+            contracts = self.calculate_contracts(symbol, position_usd, entry_price)
+            
+            if contracts < 1:
+                return {'success': False, 'error': 'Kontrat sayisi 0'}
             
             pos_side = 'long' if side.lower() == 'buy' else 'short'
             
-            # v2.1.2: Cross margin params
+            # Cross margin params
             params = {
                 'tdMode': 'cross',
                 'posSide': pos_side,
             }
             
-            # v2.1.2: attachAlgoOrds array kullan (OKX API v5 standardi)
-            if tp_price or sl_price:
+            # v2.1.3: attachAlgoOrds + Scientific notation fix
+            if tp_price or stop_price:
                 attach_algo = {}
                 
                 if tp_price:
-                    attach_algo['tpTriggerPx'] = str(tp_price)
-                    attach_algo['tpOrdPx'] = '-1'  # -1 = market price when triggered
+                    attach_algo['tpTriggerPx'] = format_price_string(tp_price)
+                    attach_algo['tpOrdPx'] = '-1'
                     attach_algo['tpTriggerPxType'] = 'last'
                 
-                if sl_price:
-                    attach_algo['slTriggerPx'] = str(sl_price)
-                    attach_algo['slOrdPx'] = '-1'  # -1 = market price when triggered
+                if stop_price:
+                    attach_algo['slTriggerPx'] = format_price_string(stop_price)
+                    attach_algo['slOrdPx'] = '-1'
                     attach_algo['slTriggerPxType'] = 'last'
                 
                 params['attachAlgoOrds'] = [attach_algo]
-                logger.info(f"📎 attachAlgoOrds: TP={tp_price}, SL={sl_price}")
+                logger.info(f"📎 attachAlgoOrds: TP={format_price_string(tp_price)}, SL={format_price_string(stop_price)}")
 
-            logger.info(f"🚀 LIMIT EMIR: {symbol} {side} {pos_side} | {contracts} Kontrat | Entry:{entry_price} TP:{tp_price} SL:{sl_price}")
+            # Entry price format
+            entry_str = format_price_string(entry_price)
             
-            # v2.1.2: LIMIT order (market degil)
+            logger.info(f"🚀 LIMIT EMIR: {coin_name} {side.upper()} {pos_side} | "
+                       f"{contracts} Kontrat | Entry:{entry_str} | Pozisyon:${position_usd:.2f}")
+            
+            # LIMIT order
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='limit',
                 side=side,
                 amount=contracts,
-                price=entry_price,  # Limit fiyati
+                price=entry_price,
                 params=params
             )
             
-            logger.info(f"✅ LIMIT EMIR BASARILI: {order['id']} @ {entry_price}")
-            return {'success': True, 'order_id': order['id'], 'contracts': contracts, 'entry_price': entry_price}
+            logger.info(f"✅ EMIR BASARILI: {order['id']} | {coin_name} {pos_side.upper()} | "
+                       f"{contracts} kontrat @ {entry_str}")
+            
+            return {
+                'success': True, 
+                'order_id': order['id'], 
+                'contracts': contracts, 
+                'entry_price': entry_price,
+                'position_usd': position_usd
+            }
             
         except Exception as e:
             logger.error(f"❌ OKX EMIR HATASI: {e}")
@@ -412,7 +540,7 @@ class OKXService:
             return {'success': False, 'error': str(e)}
 
     def close_position(self, symbol, side=None):
-        """v2.1.2: Cross margin - market order ile kapat"""
+        """Cross margin - market order ile kapat"""
         self._require_auth()
         try:
             symbol = self._normalize_symbol(symbol)
@@ -429,7 +557,6 @@ class OKXService:
             
             close_side = 'sell' if target_pos['side'] == 'long' else 'buy'
             
-            # v2.1.1: Cross margin
             params = {
                 'tdMode': 'cross',
                 'posSide': target_pos['side'],

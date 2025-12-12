@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.1.0
+T-TARS FVG Detector v2.1.3
 ==========================
 Fair Value Gap setup detection (Scanning + Validation)
 
+v2.1.3:
+- REMOVED: Config.DEFAULT_BALANCE referansi (risk hesabi okx_service'te)
+- REMOVED: Config.RISK_PER_TRADE_MIN/MAX referansi
+- REMOVED: detailed_explanation'dan risk_usd bilgisi
+- CLEAN: Sadece setup detection, risk hesabi yok
+
 v2.1.0:
-- FIX: Entry hesabı düzeltildi → Kadircan formülü (21.46% oran)
+- FIX: Entry hesabı düzeltildi → gap_high - (sum * 0.2146) [LONG]
+- FIX: Entry hesabı düzeltildi → gap_low + (sum * 0.2146) [SHORT]
 - FIX: Stop hesabı düzeltildi → Entry ± ATR
-- FIX: timestamp field eklendi (tracking_service uyumu)
-- REMOVE: STOP_MULTIPLIER kullanımı kaldırıldı
 
 Formül (Kadircan):
 LONG:  Entry = gap_high - (((gap_high + gap_low)/100) * 21.46), Stop = Entry - ATR
@@ -16,8 +21,6 @@ SHORT: Entry = gap_low + (((gap_high + gap_low)/100) * 21.46), Stop = Entry + AT
 """
 
 import logging
-import datetime
-from app.config import Config
 from app.strategies.calculators import (
     calculate_setup_strength,
     format_price,
@@ -101,7 +104,6 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         gap_high = fvg['gap_high']
         gap_low = fvg['gap_low']
         
-        # v2.1.0 FIX: Doğru FVG formülü
         # Entry = gap_high - (((gap_high + gap_low) / 100) * 21.46)
         entry_price = gap_high - (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
         
@@ -122,12 +124,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
             logger.info(f"{coin} FVG LONG rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # Setup strength hesapla
-        setup_strength = calculate_setup_strength(vol_ratio, 'medium', rr_ratio, 'MEDIUM')
-        balance = Config.DEFAULT_BALANCE
-        risk_percent = Config.RISK_PER_TRADE_MIN + (setup_strength * (Config.RISK_PER_TRADE_MAX - Config.RISK_PER_TRADE_MIN))
-        risk_usd = (balance * risk_percent) / 100
-
+        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
         detailed_explanation = f"""
 📊 **FVG Analizi (LONG):**
 • Gap: {format_price(gap_low)} - {format_price(gap_high)}
@@ -137,7 +134,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
 • Entry: {format_price(entry_price)}
 • Stop: {format_price(stop_price)}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f} | Risk: ${risk_usd:.1f}
+• R:R: {rr_ratio:.2f}
 """
         
         logger.info(f"✅ {coin} FVG LONG VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
@@ -146,7 +143,6 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
             'type': 'FVG + Volume (LONG)',
             'direction': 'LONG',
             'timeframe': timeframe,
-            'timestamp': datetime.datetime.utcnow().isoformat(),
             'entry_price': entry_price,
             'stop_price': stop_price,
             'tp1_price': tp1_price,
@@ -178,7 +174,6 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         gap_high = fvg['gap_high']
         gap_low = fvg['gap_low']
         
-        # v2.1.0 FIX: Doğru FVG formülü
         # Entry = gap_low + (((gap_high + gap_low) / 100) * 21.46)
         entry_price = gap_low + (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
         
@@ -199,12 +194,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
             logger.info(f"{coin} FVG SHORT rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # Setup strength hesapla
-        setup_strength = calculate_setup_strength(vol_ratio, 'medium', rr_ratio, 'MEDIUM')
-        balance = Config.DEFAULT_BALANCE
-        risk_percent = Config.RISK_PER_TRADE_MIN + (setup_strength * (Config.RISK_PER_TRADE_MAX - Config.RISK_PER_TRADE_MIN))
-        risk_usd = (balance * risk_percent) / 100
-
+        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
         detailed_explanation = f"""
 📊 **FVG Analizi (SHORT):**
 • Gap: {format_price(gap_low)} - {format_price(gap_high)}
@@ -214,7 +204,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
 • Entry: {format_price(entry_price)}
 • Stop: {format_price(stop_price)}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f} | Risk: ${risk_usd:.1f}
+• R:R: {rr_ratio:.2f}
 """
         
         logger.info(f"✅ {coin} FVG SHORT VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
@@ -223,7 +213,6 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
             'type': 'FVG + Volume (SHORT)',
             'direction': 'SHORT',
             'timeframe': timeframe,
-            'timestamp': datetime.datetime.utcnow().isoformat(),
             'entry_price': entry_price,
             'stop_price': stop_price,
             'tp1_price': tp1_price,

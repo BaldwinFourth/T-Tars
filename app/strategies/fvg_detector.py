@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.1.3
+T-TARS FVG Detector v2.2.5
 ==========================
 Fair Value Gap setup detection (Scanning + Validation)
+
+v2.2.5:
+- NEW: Entry distance filter - Entry, current price'tan max %3 uzakta olabilir
+- Bu sayede uzak zone'lara emir verilmez ve TP/SL hataları önlenir
 
 v2.1.3:
 - REMOVED: Config.DEFAULT_BALANCE referansi (risk hesabi okx_service'te)
@@ -36,6 +40,9 @@ VOLUME_THRESHOLD = 0.5
 
 # FVG Entry oranı (Kadircan formülü)
 FVG_ENTRY_RATIO = 21.46
+
+# v2.2.5: Entry distance filter - max %3 uzaklık
+MAX_ENTRY_DISTANCE_PERCENT = 3.0
 
 
 # --- SCANNING LOGIC ---
@@ -98,7 +105,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         
         # Volume kontrolü (threshold: 0.5x)
         if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} FVG LONG rejected: Low Volume ({vol_ratio}x < {VOLUME_THRESHOLD}x)")
+            logger.info(f"{coin} FVG LONG rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
             return None
         
         gap_high = fvg['gap_high']
@@ -106,6 +113,13 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         
         # Entry = gap_high - (((gap_high + gap_low) / 100) * 21.46)
         entry_price = gap_high - (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
+        
+        # v2.2.5: Entry distance kontrolü
+        if current_price > 0:
+            distance_percent = abs(entry_price - current_price) / current_price * 100
+            if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
+                logger.info(f"{coin} FVG LONG rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                return None
         
         # Stop = Entry - ATR (1R risk)
         stop_price = entry_price - atr
@@ -168,7 +182,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         
         # Volume kontrolü (threshold: 0.5x)
         if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} FVG SHORT rejected: Low Volume ({vol_ratio}x < {VOLUME_THRESHOLD}x)")
+            logger.info(f"{coin} FVG SHORT rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
             return None
         
         gap_high = fvg['gap_high']
@@ -176,6 +190,13 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         
         # Entry = gap_low + (((gap_high + gap_low) / 100) * 21.46)
         entry_price = gap_low + (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
+        
+        # v2.2.5: Entry distance kontrolü
+        if current_price > 0:
+            distance_percent = abs(entry_price - current_price) / current_price * 100
+            if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
+                logger.info(f"{coin} FVG SHORT rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                return None
         
         # Stop = Entry + ATR (1R risk)
         stop_price = entry_price + atr

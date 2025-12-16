@@ -1,24 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OKX Service v2.1.3
+T-TARS OKX Service v2.1.4
 =========================
 OKX Exchange Service
+
+v2.1.4:
+- CHANGED: ANALYSIS_TIMEFRAMES artik Config.TIMEFRAMES'den (3m, 5m kaldirildi)
+- NEW: Stop mesafesi limitleri (min %0.8, max %1.5 - Config'den)
+- NEW: Dinamik marjin limitleri (bakiyenin %1-2'si - Config'den)
+- FIX: Price format fix ($0.00 sorunu - kucuk fiyatli coinler)
 
 v2.1.3:
 - NEW: Risk bazli pozisyon hesaplama (gercek bakiye x RISK_PER_TRADE)
 - NEW: Pending order kontrolu (ayni coin'de bekleyen emir varsa skip)
 - NEW: Acik pozisyon kontrolu (ayni coin'de pozisyon varsa skip)
 - FIX: Scientific notation fix (kucuk fiyatli coinler icin)
-- CHANGED: place_order_with_tp_sl artik amount_usd almıyor, risk otomatik
-
-v2.1.2:
-- NEW: Market -> Limit emir (daha dusuk komisyon, slippage yok)
-- FIX: TP/SL artik attachAlgoOrds array ile gonderiliyor (OKX API v5)
-- FIX: Parameter ordType error (51000) duzeltildi
-
-v2.1.1:
-- FIX: tdMode 'isolated' -> 'cross' (Cross Margin)
-- FIX: 'hedged' parametresi kaldirildi (OKX API hatasi)
 """
 
 import ccxt
@@ -45,8 +41,31 @@ def format_price_string(price):
     return f"{float(price):.10f}".rstrip('0').rstrip('.')
 
 
+def format_price_display(price):
+    """
+    v2.1.4: Log/mesaj icin okunabilir fiyat formati
+    PEPE: 0.00001234 -> $0.00001234
+    BTC: 95000.5 -> $95,000.50
+    """
+    if price is None or price == 0:
+        return "$0.00"
+    
+    if price < 0.0001:
+        # Cok kucuk fiyatlar (SHIB, PEPE, PUMP)
+        return f"${price:.8f}"
+    elif price < 1:
+        # Kucuk fiyatlar
+        return f"${price:.6f}"
+    elif price < 100:
+        # Orta fiyatlar
+        return f"${price:.4f}"
+    else:
+        # Buyuk fiyatlar (BTC, ETH)
+        return f"${price:,.2f}"
+
+
 class OKXService:
-    """OKX Borsa Servisi - v2.1.3 (Risk Bazli + Duplicate Kontrol)"""
+    """OKX Borsa Servisi - v2.1.4 (Dinamik Marjin + Stop Limitleri)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d',
@@ -58,8 +77,6 @@ class OKXService:
         '5D': '5m', '5m': '5m',
         '3D': '3m', '3m': '3m'
     }
-    
-    ANALYSIS_TIMEFRAMES = ['4h', '2h', '1h', '30m', '15m', '5m', '3m']
     
     def __init__(self):
         self.authenticated = False
@@ -92,7 +109,9 @@ class OKXService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"OKX Servisi v2.1.3 Hazir (Lev: {Config.DEFAULT_LEVERAGE}x, Risk: %{Config.RISK_PER_TRADE}, Mode: CROSS)")
+            logger.info(f"OKX Servisi v2.1.4 Hazir | Lev:{Config.DEFAULT_LEVERAGE}x | "
+                       f"Risk:%{Config.RISK_PER_TRADE} | Stop:{Config.STOP_DISTANCE_MIN*100:.1f}-{Config.STOP_DISTANCE_MAX*100:.1f}% | "
+                       f"Marjin:%{Config.MARGIN_MIN_PERCENT}-{Config.MARGIN_MAX_PERCENT} | TFs:{len(Config.TIMEFRAMES)}")
 
         except Exception as e:
             logger.error(f"OKX Başlatma Hatası: {e}")
@@ -263,6 +282,10 @@ class OKXService:
             return {'spike': False, 'spike_ratio': 0.0, 'strength': 'low', 'trend': 'stable'}
 
     def get_complete_analysis_data(self, ticker):
+        """
+        v2.1.4: Config.TIMEFRAMES kullaniliyor (3m, 5m kaldirildi)
+        v2.1.4: format_price_display ile log'da $0.00 sorunu duzeltildi
+        """
         try:
             symbol = self._normalize_symbol(ticker)
             coin_name = ticker.replace('/USDT:USDT', '').replace('/USDT', '').replace('USDT', '')
@@ -283,7 +306,8 @@ class OKXService:
             order_blocks = {}
             fair_value_gaps = {}
             
-            for tf in self.ANALYSIS_TIMEFRAMES:
+            # v2.1.4: Config.TIMEFRAMES kullan (3m, 5m yok)
+            for tf in Config.TIMEFRAMES:
                 try:
                     ohlcv = self.get_ohlcv(symbol, tf, 100)
                     
@@ -323,7 +347,9 @@ class OKXService:
             
             total_obs = sum(len(obs) for obs in order_blocks.values())
             total_fvgs = sum(len(fvgs) for fvgs in fair_value_gaps.values())
-            logger.info(f"✅ {coin_name}: Price=${current_price:.2f}, OBs={total_obs}, FVGs={total_fvgs}")
+            
+            # v2.1.4: format_price_display kullan
+            logger.info(f"✅ {coin_name}: Price={format_price_display(current_price)}, OBs={total_obs}, FVGs={total_fvgs}")
             
             return result
             
@@ -332,7 +358,7 @@ class OKXService:
             return None
 
     # ============================================
-    # ORDER METHODS - v2.1.3 RISK BAZLI
+    # ORDER METHODS - v2.1.4 DINAMIK MARJIN
     # ============================================
     
     def has_pending_orders(self, symbol):
@@ -391,17 +417,19 @@ class OKXService:
 
     def calculate_position_size(self, entry_price, stop_price):
         """
-        v2.1.3: Risk bazli pozisyon boyutu hesaplama
+        v2.1.4: Risk bazli pozisyon + Stop limitleri + Dinamik marjin
+        
+        Degisiklikler:
+        - Stop mesafesi min %0.8, max %1.5 (Config'den)
+        - Marjin min %1, max %2 bakiye (Config'den)
         
         Formul:
-        - Risk Amount = Balance × RISK_PER_TRADE%
-        - Stop Distance = |Entry - Stop| / Entry
-        - Position Size = Risk Amount / Stop Distance
-        
-        Ornek:
-        - Balance: $2000, Risk: %1 = $20
-        - Entry: 100, Stop: 99 (mesafe: %1)
-        - Position = $20 / 0.01 = $2000
+        1. Stop mesafesi hesapla ve clamp et
+        2. Risk = Bakiye x RISK_PER_TRADE%
+        3. Pozisyon = Risk / Stop mesafesi
+        4. Marjin = Pozisyon / Leverage
+        5. Marjin'i min-max arasinda tut
+        6. Final Pozisyon = Marjin x Leverage
         """
         try:
             # 1. Gercek bakiye al
@@ -412,24 +440,48 @@ class OKXService:
             else:
                 real_balance = float(balance['free'])
             
-            # 2. Risk miktari hesapla
-            risk_percent = Config.RISK_PER_TRADE / 100  # 1.0 -> 0.01
-            risk_amount = real_balance * risk_percent
-            
-            # 3. Stop mesafesi hesapla
+            # 2. Stop mesafesi hesapla
             stop_distance = abs(entry_price - stop_price)
             stop_distance_pct = stop_distance / entry_price if entry_price > 0 else 0.01
             
-            # 4. Pozisyon boyutu
-            if stop_distance_pct > 0:
-                position_size = risk_amount / stop_distance_pct
-            else:
-                position_size = risk_amount * 10  # Fallback
+            # v2.1.4: Stop mesafesi limitleri (Config'den)
+            original_stop_pct = stop_distance_pct
+            stop_distance_pct = max(Config.STOP_DISTANCE_MIN, min(stop_distance_pct, Config.STOP_DISTANCE_MAX))
             
-            logger.info(f"📐 Risk Hesabi: Bakiye=${real_balance:.2f}, Risk%={Config.RISK_PER_TRADE}, "
-                       f"Risk$={risk_amount:.2f}, StopDist={stop_distance_pct:.4%}, Pozisyon=${position_size:.2f}")
+            stop_clamped = original_stop_pct != stop_distance_pct
+            if stop_clamped:
+                logger.info(f"📏 Stop mesafesi clamp: {original_stop_pct:.4%} → {stop_distance_pct:.4%}")
             
-            return position_size
+            # 3. Risk miktari hesapla
+            risk_percent = Config.RISK_PER_TRADE / 100  # 1.0 -> 0.01
+            risk_amount = real_balance * risk_percent
+            
+            # 4. Pozisyon boyutu (notional)
+            position_size = risk_amount / stop_distance_pct
+            
+            # 5. v2.1.4: Dinamik marjin limitleri (Config'den)
+            min_margin = real_balance * (Config.MARGIN_MIN_PERCENT / 100)
+            max_margin = real_balance * (Config.MARGIN_MAX_PERCENT / 100)
+            
+            # Hesaplanan marjin
+            calculated_margin = position_size / Config.DEFAULT_LEVERAGE
+            
+            # Marjin clamp
+            original_margin = calculated_margin
+            final_margin = max(min_margin, min(calculated_margin, max_margin))
+            
+            margin_clamped = original_margin != final_margin
+            if margin_clamped:
+                logger.info(f"💰 Marjin clamp: ${original_margin:.2f} → ${final_margin:.2f} (min:${min_margin:.2f}, max:${max_margin:.2f})")
+            
+            # 6. Final pozisyon boyutu
+            final_position = final_margin * Config.DEFAULT_LEVERAGE
+            
+            logger.info(f"📐 Risk Hesabi: Bakiye=${real_balance:.2f} | Risk%={Config.RISK_PER_TRADE} | "
+                       f"Risk$={risk_amount:.2f} | Stop={stop_distance_pct:.2%} | "
+                       f"Marjin=${final_margin:.2f} | Pozisyon=${final_position:.2f}")
+            
+            return final_position
             
         except Exception as e:
             logger.error(f"Position size hesaplama hatasi: {e}")
@@ -437,14 +489,11 @@ class OKXService:
 
     def place_order_with_tp_sl(self, symbol, side, entry_price, stop_price, tp_price=None):
         """
-        v2.1.3: Risk Bazli LIMIT Order + attachAlgoOrds
+        v2.1.4: Dinamik Marjin + Stop Limitleri ile LIMIT Order
         
         Degisiklikler:
-        - amount_usd parametresi KALDIRILDI
-        - Risk otomatik hesaplaniyor (bakiye x RISK_PER_TRADE%)
-        - Pending order kontrolu eklendi
-        - Acik pozisyon kontrolu eklendi
-        - Scientific notation fix eklendi
+        - calculate_position_size artik stop ve marjin limitlerini uyguluyor
+        - format_price_display ile log'larda okunabilir fiyat
         """
         self._require_auth()
         try:
@@ -466,7 +515,7 @@ class OKXService:
             # Leverage ayarla
             self.set_leverage(symbol)
             
-            # v2.1.3: Risk bazli pozisyon boyutu
+            # v2.1.4: Risk bazli + limit uygulanmis pozisyon boyutu
             position_usd = self.calculate_position_size(entry_price, stop_price)
             
             # Kontrat hesapla
@@ -483,7 +532,7 @@ class OKXService:
                 'posSide': pos_side,
             }
             
-            # v2.1.3: attachAlgoOrds + Scientific notation fix
+            # attachAlgoOrds + Scientific notation fix
             if tp_price or stop_price:
                 attach_algo = {}
                 
@@ -503,8 +552,9 @@ class OKXService:
             # Entry price format
             entry_str = format_price_string(entry_price)
             
+            # v2.1.4: format_price_display kullan
             logger.info(f"🚀 LIMIT EMIR: {coin_name} {side.upper()} {pos_side} | "
-                       f"{contracts} Kontrat | Entry:{entry_str} | Pozisyon:${position_usd:.2f}")
+                       f"{contracts} Kontrat | Entry:{format_price_display(entry_price)} | Pozisyon:${position_usd:.2f}")
             
             # LIMIT order
             order = self.exchange.create_order(
@@ -517,7 +567,7 @@ class OKXService:
             )
             
             logger.info(f"✅ EMIR BASARILI: {order['id']} | {coin_name} {pos_side.upper()} | "
-                       f"{contracts} kontrat @ {entry_str}")
+                       f"{contracts} kontrat @ {format_price_display(entry_price)}")
             
             return {
                 'success': True, 

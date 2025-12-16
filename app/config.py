@@ -1,19 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.1.3
+T-TARS Configuration v2.2.8
 ===========================
 
-v2.1.3:
-- REMOVED: MAX_POSITION_SIZE (risk hesabi artik okx_service'te)
-- REMOVED: RISK_PER_TRADE_MIN/MAX -> tek RISK_PER_TRADE
-- REMOVED: DEFAULT_BALANCE (gercek bakiye OKX'ten alinacak)
-- NOTE: Risk hesabi okx_service.py tarafindan yapiliyor
+v2.2.6:
+- CHANGED: AUTO_SCAN_PAIRS 9 coine düşürüldü (log kirliliği azaltma)
 
-v2.0.3:
-- DEFAULT_LEVERAGE = 3 eklendi
-- MONITOR_INTERVAL_MINUTES = 3 (Düzeltildi)
-- OKX API credentials mevcut
-- OKX_TRADING_ENABLED flag (/stopokx, /startokx)
+v2.2.2:
+- FIX: 2h timeframe kaldırıldı (CCXT Bitget bug - GitHub #27281)
+
+v2.2.0:
+- CHANGED: OKX → Bitget API geçişi
 """
 
 import os
@@ -21,7 +18,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.1.3"""
+    """T-TARS Configuration v2.2.8"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -46,17 +43,16 @@ class Config:
         return [Config.TELEGRAM_CHAT_ID]
     
     # ============================================
-    # OKX API
+    # BITGET API (v2.2.0 - OKX'ten geçiş)
     # ============================================
-    OKX_API_KEY = os.getenv('OKX_API_KEY', '')
-    OKX_SECRET_KEY = os.getenv('OKX_SECRET_KEY', '')
-    OKX_PASSPHRASE = os.getenv('OKX_PASSPHRASE', '')
-    OKX_DEMO_MODE = os.getenv('OKX_DEMO_MODE', 'false').lower() == 'true'
+    BITGET_API_KEY = os.getenv('BITGET_API_KEY', '')
+    BITGET_SECRET_KEY = os.getenv('BITGET_SECRET_KEY', '')
+    BITGET_PASSPHRASE = os.getenv('BITGET_PASSPHRASE', '')
     
-    # Trading ON/OFF switch (/stopokx, /startokx)
-    OKX_TRADING_ENABLED = os.getenv('OKX_TRADING_ENABLED', 'true').lower() == 'true'
+    # Trading ON/OFF switch (/stopbitget, /startbitget)
+    BITGET_TRADING_ENABLED = os.getenv('BITGET_TRADING_ENABLED', 'true').lower() == 'true'
 
-    # v2.0.3: Default Leverage (3x)
+    # Default Leverage (20x)
     DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '20'))
     
     # ============================================
@@ -78,42 +74,57 @@ class Config:
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
     
     # ============================================
-    # TRADING PAIRS
+    # TIMEFRAMES (v2.2.2)
+    # ============================================
+    # 2h kaldırıldı - CCXT Bitget bug (GitHub #27281)
+    TIMEFRAMES = ['4h', '1h', '30m', '15m', '5m']
+    
+    # ============================================
+    # TRADING PAIRS (v2.2.8 - Sadece 7 coin)
     # ============================================
     
-    # Auto-scan listesi (14 coin)
+    # Auto-scan listesi (7 coin - log kirliliği azaltma)
     AUTO_SCAN_PAIRS = [
-        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
-        'BNB/USDT:USDT', 'XRP/USDT:USDT', 'AVAX/USDT:USDT', 
-        'LTC/USDT:USDT', 'TRX/USDT:USDT', 'DOGE/USDT:USDT', 
-        'SHIB/USDT:USDT', 'PEPE/USDT:USDT', 'TRUMP/USDT:USDT', 
-        'JUP/USDT:USDT', 'PUMP/USDT:USDT'
+        'BTC/USDT:USDT',   # Bitcoin
+        'ETH/USDT:USDT',   # Ethereum
+        'SOL/USDT:USDT',   # Solana
+        'BNB/USDT:USDT',   # BNB
+        'XAU/USDT:USDT',   # Gold
+        'JUP/USDT:USDT',   # Jupiter
+        'BGB/USDT:USDT',   # Bitget Token
     ]
     
-    # Manuel /plan için
+    # Manuel /plan için (genişletilmiş liste)
     MANUAL_PAIRS = [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
         'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 
         'TRUMP/USDT:USDT', 'JUP/USDT:USDT', 'AVAX/USDT:USDT', 
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
-        'PUMP/USDT:USDT', 'BCH/USDT:USDT'
+        'PUMP/USDT:USDT', 'BCH/USDT:USDT',
+        'XAU/USDT:USDT', 'FLOKI/USDT:USDT', 'BGB/USDT:USDT',
     ]
     
     # ============================================
-    # RISK MANAGEMENT
+    # RISK MANAGEMENT (v2.1.4)
     # ============================================
-    # v2.1.3: Risk hesabi okx_service.py'de yapiliyor
     RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # %1 risk (default)
     
+    # Stop mesafesi limitleri
+    STOP_DISTANCE_MIN = float(os.getenv('STOP_DISTANCE_MIN', '0.008'))  # %0.8 minimum
+    STOP_DISTANCE_MAX = float(os.getenv('STOP_DISTANCE_MAX', '0.015'))  # %1.5 maksimum
+    
+    # Dinamik marjin limitleri
+    MARGIN_MIN_PERCENT = float(os.getenv('MARGIN_MIN_PERCENT', '1.0'))  # %1
+    MARGIN_MAX_PERCENT = float(os.getenv('MARGIN_MAX_PERCENT', '2.0'))  # %2
+    
     # Safety limits
-    MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '50'))
-    MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '5'))
+    MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '500'))
+    MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
     
     # ============================================
     # MONITORING & SERVER
     # ============================================
-    # v2.0.3: Monitor süresi 3 dakika
     MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '3'))
     PORT = int(os.getenv('PORT', '8080'))
     
@@ -130,22 +141,21 @@ class Config:
         return True
     
     @staticmethod
-    def validate_okx():
-        """Validate OKX API configuration"""
-        required = ['OKX_API_KEY', 'OKX_SECRET_KEY', 'OKX_PASSPHRASE']
+    def validate_bitget():
+        """Validate Bitget API configuration"""
+        required = ['BITGET_API_KEY', 'BITGET_SECRET_KEY', 'BITGET_PASSPHRASE']
         missing = [key for key in required if not getattr(Config, key)]
         if missing:
-            return False, f"Missing OKX config: {', '.join(missing)}"
-        return True, "OKX config OK"
+            return False, f"Missing Bitget config: {', '.join(missing)}"
+        return True, "Bitget config OK"
     
     @staticmethod
     def get_pair_symbol(ticker):
-        """Convert user input to OKX format"""
+        """Convert user input to Bitget format"""
         ticker = ticker.upper().replace('USDT', '')
-        if ticker in ['LSK']: return f'{ticker}/USDT'
         return f'{ticker}/USDT:USDT'
     
     @staticmethod
-    def get_clean_pair(okx_pair):
-        """OKX formatından temiz parite adı al"""
-        return okx_pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')
+    def get_clean_pair(bitget_pair):
+        """Bitget formatından temiz parite adı al"""
+        return bitget_pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')

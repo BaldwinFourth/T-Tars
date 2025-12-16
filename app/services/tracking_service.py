@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v2.1.1
+T-TARS Tracking Service v2.2.8
 ==============================
-Setup Tracking & Performance Analytics Service
+Setup Logging & Performance Analytics Service
 
-v2.1.1:
-- NEW: get_aggregate_stats(real_balance) → OKX balance parametresi
-- NEW: Top 5 / Worst 5 coin (win rate bazlı)
-- NEW: Top 5 / Worst 5 timeframe (win rate bazlı)
-- FIX: Hardcoded 1000$ kaldırıldı
+v2.2.8:
+- NEW: mark_setup_expired() - 4 saat sonra dolmayan emirler için
 
-v2.0.3:
-- coin_breakdown eklendi (/score için top 3 coin)
+v2.2.4:
+- REMOVED: check_setup_status() - Ezbere fiyat karşılaştırması KALDIRILDI
+- NEW: update_setup_from_bitget() - Bitget'ten gelen gerçek sonuçla güncelle
+- NEW: mark_setup_completed() - Manuel tamamlama
+- CHANGED: Artık sadece log tutuyor, takip Bitget API üzerinden yapılıyor
+
+v2.2.2:
+- FIX: log_setup KeyError hatası düzeltildi
+
+v2.2.1:
+- REMOVED: check_duplicate_setup() kaldırıldı
 """
 
 from google.cloud import storage
@@ -23,6 +29,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 TURKEY_TZ = timezone(timedelta(hours=3))
+MIN_TRADES_FOR_RANKING = 3
 
 
 def format_price(price):
@@ -41,104 +48,106 @@ def format_price(price):
         return f"${price:,.2f}"
 
 
+def calculate_ranking_score(win_rate, trade_count):
+    """Ağırlıklı sıralama skoru"""
+    if trade_count == 0:
+        return 0
+    weight = 1 - (1 / (trade_count + 1))
+    return win_rate * weight
+
+
 class TrackingService:
-    """Setup Tracking & Performance Analytics Service"""
+    """Setup Logging & Performance Analytics Service v2.2.8"""
     
     def __init__(self, bucket_name='tars-trading-data'):
         self.bucket_name = bucket_name
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        logger.info(f"✅ Tracking Service initialized: {bucket_name}")
-    
-    def check_duplicate_setup(self, pair, timeframe, direction):
-        """Duplicate detection - aynı pair+tf+direction için PENDING/TP1 setup var mı"""
-        try:
-            blobs = self.bucket.list_blobs(prefix='setups/')
-            
-            for blob in blobs:
-                if not blob.name.endswith('.json'):
-                    continue
-                
-                try:
-                    setup = json.loads(blob.download_as_string())
-                    
-                    if setup['status'] not in ['PENDING', 'TP1']:
-                        continue
-                    if setup['pair'] != pair:
-                        continue
-                    if setup.get('timeframe', 'N/A') != timeframe:
-                        continue
-                    
-                    setup_direction = 'LONG' if 'LONG' in setup['setup_type'] else 'SHORT'
-                    if setup_direction != direction:
-                        continue
-                    
-                    logger.info(f"⚠️ Duplicate detected: {pair} {timeframe} {direction} → existing #{setup['setup_id']}")
-                    return setup['setup_id']
-                    
-                except Exception:
-                    continue
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Duplicate check error: {e}")
-            return None
+        logger.info(f"✅ Tracking Service v2.2.8 initialized: {bucket_name}")
     
     def log_setup(self, setup_data):
-        """Setup detected olduğunda kaydet"""
+        """
+        Setup/Trade kaydet
+        
+        v2.2.4: Sadece kayıt tutar, takip yapmaz
+        """
         try:
             pair = setup_data['pair']
             timeframe = setup_data.get('timeframe', 'N/A')
             setup_type = setup_data['setup_type']
-            direction = 'LONG' if 'LONG' in setup_type else 'SHORT'
-            
-            existing_id = self.check_duplicate_setup(pair, timeframe, direction)
-            if existing_id:
-                logger.info(f"⏭️ Skipping duplicate: {pair} {timeframe} {direction} (existing: #{existing_id})")
-                return None
             
             setup_id = str(uuid.uuid4())[:8]
             
-            # v2.1.1: balance_before artık main.py'den geliyor (gerçek OKX balance)
             balance = setup_data.get('balance_before', 500.0)
             risk_percent = setup_data.get('risk_percent', 2.0)
             risk_dollars = balance * (risk_percent / 100)
             
             entry_price = setup_data.get('entry_price', setup_data.get('current_price', 0))
+            current_price = setup_data.get('current_price', 0)
+            stop_price = setup_data.get('stop_price', setup_data.get('stop_loss', 0))
+            tp1_price = setup_data.get('tp1_price', setup_data.get('tp1', 0))
+            tp2_price = setup_data.get('tp2_price', setup_data.get('tp2', 0))
+            entry_zone_val = setup_data.get('entry_zone', entry_price)
+            
+            # Bitget order bilgileri
+            order_id = setup_data.get('order_id')
+            tracking_no = setup_data.get('tracking_no')
+            contracts = setup_data.get('contracts', 0)
+            position_usd = setup_data.get('position_usd', 0)
             
             setup_record = {
                 'setup_id': setup_id,
                 'pair': pair,
-                'timestamp': setup_data['timestamp'],
+                'timestamp': setup_data.get('timestamp', datetime.now(TURKEY_TZ).isoformat()),
                 'setup_type': setup_type,
-                'confidence': setup_data['confidence'],
+                'confidence': setup_data.get('confidence', 'MEDIUM'),
                 'timeframe': timeframe,
-                'entry_zone': setup_data['entry_zone'],
-                'stop_loss': setup_data['stop_loss'],
-                'tp1': setup_data['tp1'],
-                'tp2': setup_data['tp2'],
-                'current_price': setup_data['current_price'],
+                'direction': setup_data.get('direction', 'long' if 'LONG' in setup_type else 'short'),
+                
+                # Fiyatlar
+                'entry_zone': entry_zone_val,
                 'entry_price': entry_price,
-                'stop_price': setup_data['stop_price'],
-                'tp1_price': setup_data['tp1_price'],
-                'tp2_price': setup_data['tp2_price'],
+                'current_price': current_price,
+                'stop_price': stop_price,
+                'stop_loss': stop_price,
+                'tp1_price': tp1_price,
+                'tp1': tp1_price,
+                'tp2_price': tp2_price,
+                'tp2': tp2_price,
+                
+                # Risk/Reward
                 'volume_spike_ratio': setup_data.get('volume_spike_ratio', 0),
                 'ob_strength': setup_data.get('ob_strength', 'medium'),
                 'rr_ratio': setup_data.get('rr_ratio', 0),
                 'balance_before': balance,
                 'risk_percent': risk_percent,
                 'risk_dollars': risk_dollars,
-                'status': 'PENDING',
-                'result': None,
+                
+                # Bitget Order Info - v2.2.4
+                'order_id': order_id,
+                'tracking_no': tracking_no,
+                'contracts': contracts,
+                'position_usd': position_usd,
+                
+                # Status - Bitget'ten güncellenecek
+                'status': 'PENDING',  # PENDING, FILLED, TP1, TP2, STOPPED, CANCELLED, EXPIRED
+                'result': None,       # WIN, LOSS, BREAKEVEN, None
                 'profit_loss': 0.0,
+                'profit_loss_percent': 0.0,
                 'balance_after': balance,
-                'movement_captured_dollars': 0.0,
+                
+                # Timestamps
                 'created_at': datetime.now(TURKEY_TZ).isoformat(),
-                'tp1_hit_at': None,
-                'tp2_hit_at': None,
-                'stop_hit_at': None,
-                'duration_minutes': None
+                'filled_at': None,
+                'closed_at': None,
+                'expired_at': None,  # v2.2.8
+                'duration_minutes': None,
+                
+                # Bitget gerçek veriler - sonradan güncellenecek
+                'bitget_entry_price': None,
+                'bitget_close_price': None,
+                'bitget_pnl': None,
+                'bitget_fee': None,
             }
             
             blob = self.bucket.blob(f'setups/{setup_id}.json')
@@ -147,157 +156,224 @@ class TrackingService:
                 content_type='application/json'
             )
             
-            logger.info(f"✅ Setup logged: {setup_id} ({pair}) TF:{timeframe} Entry:{format_price(entry_price)}")
+            logger.info(f"✅ Setup logged: {setup_id} | {pair} {setup_type} | TF:{timeframe} | "
+                       f"Entry:{format_price(entry_price)} | trackingNo:{tracking_no}")
             return setup_id
             
         except Exception as e:
             logger.error(f"❌ Log setup error: {e}")
             raise
     
-    def check_setup_status(self, setup_id, current_price):
-        """Bir setup'ın durumunu check et (TP/Stop hit kontrolü)"""
+    def mark_setup_expired(self, setup_id):
+        """
+        v2.2.8: 4 saat dolunca emir iptal edildiğinde çağır
+        
+        Status: PENDING → EXPIRED
+        """
         try:
             blob = self.bucket.blob(f'setups/{setup_id}.json')
             
             if not blob.exists():
                 logger.warning(f"⚠️ Setup not found: {setup_id}")
-                return {'status_changed': False, 'old_status': None, 'new_status': None, 'not_found': True}
+                return False
+            
+            setup = json.loads(blob.download_as_string())
+            old_status = setup['status']
+            
+            # Sadece PENDING durumundaki emirler expire edilebilir
+            if old_status != 'PENDING':
+                logger.warning(f"⚠️ Setup {setup_id} not PENDING ({old_status}), skipping expire")
+                return False
+            
+            setup['status'] = 'EXPIRED'
+            setup['expired_at'] = datetime.now(TURKEY_TZ).isoformat()
+            setup['closed_at'] = datetime.now(TURKEY_TZ).isoformat()
+            setup['result'] = None  # Expire = ne win ne loss
+            
+            # Duration hesapla
+            start_time = setup.get('created_at')
+            if start_time:
+                start = datetime.fromisoformat(start_time)
+                now = datetime.now(TURKEY_TZ)
+                setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+            
+            blob.upload_from_string(
+                json.dumps(setup, indent=2),
+                content_type='application/json'
+            )
+            
+            logger.info(f"⏰ Setup {setup_id} marked as EXPIRED (was {old_status})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Mark setup expired error: {e}")
+            return False
+    
+    def update_setup_from_bitget(self, setup_id, bitget_data):
+        """
+        v2.2.4: Bitget'ten gelen gerçek verilerle güncelle
+        
+        Args:
+            setup_id: Setup ID
+            bitget_data: {
+                'status': 'FILLED' | 'TP1' | 'TP2' | 'STOPPED' | 'CANCELLED',
+                'result': 'WIN' | 'LOSS' | 'BREAKEVEN' | None,
+                'pnl': float,  # Gerçek P/L
+                'fee': float,  # İşlem ücreti
+                'entry_price': float,  # Gerçek giriş fiyatı
+                'close_price': float,  # Kapanış fiyatı
+            }
+        """
+        try:
+            blob = self.bucket.blob(f'setups/{setup_id}.json')
+            
+            if not blob.exists():
+                logger.warning(f"⚠️ Setup not found: {setup_id}")
+                return False
+            
+            setup = json.loads(blob.download_as_string())
+            old_status = setup['status']
+            
+            # Güncelle
+            new_status = bitget_data.get('status', setup['status'])
+            setup['status'] = new_status
+            
+            if bitget_data.get('result'):
+                setup['result'] = bitget_data['result']
+            
+            if bitget_data.get('pnl') is not None:
+                setup['bitget_pnl'] = bitget_data['pnl']
+                setup['profit_loss'] = bitget_data['pnl']
+                setup['balance_after'] = setup['balance_before'] + bitget_data['pnl']
+                
+                if setup['balance_before'] > 0:
+                    setup['profit_loss_percent'] = (bitget_data['pnl'] / setup['balance_before']) * 100
+            
+            if bitget_data.get('fee') is not None:
+                setup['bitget_fee'] = bitget_data['fee']
+            
+            if bitget_data.get('entry_price'):
+                setup['bitget_entry_price'] = bitget_data['entry_price']
+            
+            if bitget_data.get('close_price'):
+                setup['bitget_close_price'] = bitget_data['close_price']
+            
+            # Filled timestamp
+            if new_status == 'FILLED' and not setup.get('filled_at'):
+                setup['filled_at'] = datetime.now(TURKEY_TZ).isoformat()
+            
+            # Closed timestamp & duration
+            if new_status in ['TP1', 'TP2', 'STOPPED', 'CANCELLED', 'CLOSED'] and not setup.get('closed_at'):
+                setup['closed_at'] = datetime.now(TURKEY_TZ).isoformat()
+                
+                start_time = setup.get('filled_at') or setup.get('created_at')
+                if start_time:
+                    start = datetime.fromisoformat(start_time)
+                    now = datetime.now(TURKEY_TZ)
+                    setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+            
+            blob.upload_from_string(
+                json.dumps(setup, indent=2),
+                content_type='application/json'
+            )
+            
+            logger.info(f"✅ Setup {setup_id} updated from Bitget: {old_status} → {new_status} | "
+                       f"P/L: {format_price(setup.get('profit_loss', 0))}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Update setup from Bitget error: {e}")
+            return False
+    
+    def mark_setup_filled(self, setup_id, tracking_no=None, entry_price=None):
+        """
+        v2.2.4: Emir dolduğunda çağır
+        """
+        try:
+            blob = self.bucket.blob(f'setups/{setup_id}.json')
+            
+            if not blob.exists():
+                return False
             
             setup = json.loads(blob.download_as_string())
             
-            old_status = setup['status']
-            new_status = old_status
-            message = ""
+            setup['status'] = 'FILLED'
+            setup['filled_at'] = datetime.now(TURKEY_TZ).isoformat()
             
-            if setup['status'] in ['COMPLETED', 'STOPPED']:
-                return {'status_changed': False, 'old_status': old_status, 'new_status': new_status}
+            if tracking_no:
+                setup['tracking_no'] = tracking_no
             
-            setup_type = setup['setup_type']
-            is_long = 'LONG' in setup_type
+            if entry_price:
+                setup['bitget_entry_price'] = entry_price
             
-            entry = setup.get('entry_price', setup['current_price'])
-            stop = setup['stop_price']
-            tp1 = setup['tp1_price']
-            tp2 = setup['tp2_price']
-            balance_before = setup['balance_before']
-            risk_dollars = setup.get('risk_dollars', balance_before * 0.02)
-            rr_ratio = setup.get('rr_ratio', 2.0)
+            blob.upload_from_string(
+                json.dumps(setup, indent=2),
+                content_type='application/json'
+            )
             
-            # PENDING → TP1 veya STOPPED
-            if setup['status'] == 'PENDING':
-                if is_long and current_price >= tp1:
-                    new_status = 'TP1'
-                    setup['tp1_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    partial_profit = risk_dollars * 1.0
-                    setup['profit_loss'] = partial_profit
-                    setup['balance_after'] = balance_before + partial_profit
-                    setup['result'] = 'PARTIAL_WIN'
-                    setup['movement_captured_dollars'] = abs(tp1 - entry)
-                    message = "TP1_HIT"
-
-                elif not is_long and current_price <= tp1:
-                    new_status = 'TP1'
-                    setup['tp1_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    partial_profit = risk_dollars * 1.0
-                    setup['profit_loss'] = partial_profit
-                    setup['balance_after'] = balance_before + partial_profit
-                    setup['result'] = 'PARTIAL_WIN'
-                    setup['movement_captured_dollars'] = abs(entry - tp1)
-                    message = "TP1_HIT"
-                
-                elif is_long and current_price <= stop:
-                    new_status = 'STOPPED'
-                    setup['result'] = 'LOSS'
-                    setup['stop_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = -risk_dollars
-                    setup['balance_after'] = balance_before - risk_dollars
-                    setup['movement_captured_dollars'] = abs(entry - stop)
-                    message = "STOP_HIT"
-
-                elif not is_long and current_price >= stop:
-                    new_status = 'STOPPED'
-                    setup['result'] = 'LOSS'
-                    setup['stop_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = -risk_dollars
-                    setup['balance_after'] = balance_before - risk_dollars
-                    setup['movement_captured_dollars'] = abs(stop - entry)
-                    message = "STOP_HIT"
-            
-            # TP1 → TP2 (COMPLETED) veya BREAKEVEN
-            elif setup['status'] == 'TP1':
-                if is_long and current_price >= tp2:
-                    new_status = 'COMPLETED'
-                    setup['result'] = 'WIN'
-                    setup['tp2_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    tp1_profit = risk_dollars * 1.0
-                    tp2_additional = risk_dollars * (rr_ratio - 1.0) * 0.5
-                    setup['profit_loss'] = tp1_profit + tp2_additional
-                    setup['balance_after'] = balance_before + setup['profit_loss']
-                    setup['movement_captured_dollars'] = abs(tp2 - entry)
-                    message = "TP2_HIT"
-
-                elif not is_long and current_price <= tp2:
-                    new_status = 'COMPLETED'
-                    setup['result'] = 'WIN'
-                    setup['tp2_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    tp1_profit = risk_dollars * 1.0
-                    tp2_additional = risk_dollars * (rr_ratio - 1.0) * 0.5
-                    setup['profit_loss'] = tp1_profit + tp2_additional
-                    setup['balance_after'] = balance_before + setup['profit_loss']
-                    setup['movement_captured_dollars'] = abs(entry - tp2)
-                    message = "TP2_HIT"
-
-                elif is_long and current_price <= entry:
-                    new_status = 'COMPLETED'
-                    setup['result'] = 'BREAKEVEN'
-                    setup['stop_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = 0.0
-                    setup['balance_after'] = balance_before
-                    setup['movement_captured_dollars'] = abs(tp1 - entry)
-                    message = "BREAKEVEN"
-
-                elif not is_long and current_price >= entry:
-                    new_status = 'COMPLETED'
-                    setup['result'] = 'BREAKEVEN'
-                    setup['stop_hit_at'] = datetime.now(TURKEY_TZ).isoformat()
-                    setup['profit_loss'] = 0.0
-                    setup['balance_after'] = balance_before
-                    setup['movement_captured_dollars'] = abs(entry - tp1)
-                    message = "BREAKEVEN"
-            
-            if new_status != old_status:
-                created_at = datetime.fromisoformat(setup['created_at'])
-                now = datetime.now(TURKEY_TZ)
-                duration = (now - created_at).total_seconds() / 60
-                setup['duration_minutes'] = round(duration, 1)
-                
-                setup['status'] = new_status
-                blob.upload_from_string(
-                    json.dumps(setup, indent=2),
-                    content_type='application/json'
-                )
-                logger.info(f"✅ Setup {setup_id} status updated: {old_status} → {new_status} (Duration: {duration:.1f}m)")
-                return {
-                    'status_changed': True,
-                    'old_status': old_status,
-                    'new_status': new_status,
-                    'message': message,
-                    'setup': setup
-                }
-            
-            return {'status_changed': False, 'old_status': old_status, 'new_status': new_status}
+            logger.info(f"✅ Setup {setup_id} marked as FILLED | trackingNo: {tracking_no}")
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Check setup error: {e}")
-            return {'status_changed': False, 'old_status': None, 'new_status': None}
+            logger.error(f"❌ Mark setup filled error: {e}")
+            return False
     
-    def get_all_pending_setups(self):
-        """Tüm PENDING ve TP1 durumundaki setup'ları getir"""
+    def get_setup_by_tracking_no(self, tracking_no):
+        """
+        v2.2.4: trackingNo ile setup bul
+        """
         try:
             blobs = self.bucket.list_blobs(prefix='setups/')
-            pending_setups = []
-            timeframe_counts = {}
-            skipped_count = 0
+            
+            for blob in blobs:
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
+                    setup = json.loads(blob.download_as_string())
+                    if setup.get('tracking_no') == tracking_no:
+                        return setup
+                except:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Get setup by tracking_no error: {e}")
+            return None
+    
+    def get_setup_by_order_id(self, order_id):
+        """
+        v2.2.4: order_id ile setup bul
+        """
+        try:
+            blobs = self.bucket.list_blobs(prefix='setups/')
+            
+            for blob in blobs:
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
+                    setup = json.loads(blob.download_as_string())
+                    if setup.get('order_id') == order_id:
+                        return setup
+                except:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Get setup by order_id error: {e}")
+            return None
+    
+    def get_pending_setups(self):
+        """
+        v2.2.4: Sadece PENDING ve FILLED durumundaki setup'lar
+        (Henüz kapanmamış pozisyonlar)
+        """
+        try:
+            blobs = self.bucket.list_blobs(prefix='setups/')
+            pending = []
             
             for blob in blobs:
                 if not blob.name.endswith('.json'):
@@ -306,52 +382,37 @@ class TrackingService:
                 try:
                     setup = json.loads(blob.download_as_string())
                     
-                    if setup['status'] in ['PENDING', 'TP1']:
-                        tf = setup.get('timeframe', 'N/A')
-                        pending_setups.append({
-                            'id': setup['setup_id'],
+                    if setup['status'] in ['PENDING', 'FILLED']:
+                        pending.append({
                             'setup_id': setup['setup_id'],
                             'pair': setup['pair'],
+                            'direction': setup.get('direction', 'long'),
                             'setup_type': setup['setup_type'],
-                            'timeframe': tf,
-                            'current_price': setup['current_price'],
-                            'entry_price': setup.get('entry_price', setup['current_price']),
-                            'tp1_price': setup['tp1_price'],
-                            'tp2_price': setup['tp2_price'],
-                            'stop_price': setup['stop_price'],
-                            'status': setup['status']
+                            'timeframe': setup.get('timeframe', 'N/A'),
+                            'order_id': setup.get('order_id'),
+                            'tracking_no': setup.get('tracking_no'),
+                            'entry_price': setup.get('entry_price', 0),
+                            'stop_price': setup.get('stop_price', 0),
+                            'tp1_price': setup.get('tp1_price', 0),
+                            'tp2_price': setup.get('tp2_price', 0),
+                            'status': setup['status'],
+                            'created_at': setup.get('created_at'),
                         })
-                        
-                        if tf not in timeframe_counts:
-                            timeframe_counts[tf] = 0
-                        timeframe_counts[tf] += 1
-                        
-                except Exception:
-                    skipped_count += 1
+                except:
                     continue
             
-            if skipped_count > 0:
-                logger.warning(f"⚠️ Skipped {skipped_count} unreadable setup files")
-            
-            logger.info(f"📊 Pending setups: {len(pending_setups)} | TF breakdown: {timeframe_counts}")
-            return {
-                'setups': pending_setups,
-                'timeframe_breakdown': timeframe_counts,
-                'total': len(pending_setups)
-            }
+            logger.info(f"📊 Pending/Filled setups: {len(pending)}")
+            return pending
             
         except Exception as e:
             logger.error(f"❌ Get pending setups error: {e}")
-            return {'setups': [], 'timeframe_breakdown': {}, 'total': 0}
+            return []
     
     def get_aggregate_stats(self, real_balance=None):
         """
         /score komutu için aggregate istatistikler
         
-        v2.1.1:
-        - real_balance parametresi eklendi (OKX'ten)
-        - Top 5 / Worst 5 coin
-        - Top 5 / Worst 5 timeframe
+        v2.2.8: EXPIRED status eklendi
         """
         try:
             blobs = self.bucket.list_blobs(prefix='setups/')
@@ -361,15 +422,14 @@ class TrackingService:
             losing_trades = 0
             breakeven_trades = 0
             pending_setups = 0
+            expired_setups = 0  # v2.2.8
             
-            # v2.1.1: Gerçek balance kullan (fallback 500)
-            starting_balance = real_balance if real_balance else 500.0
-            current_balance = starting_balance
+            starting_balance = real_balance if real_balance and real_balance > 0 else 500.0
+            total_profit_loss = 0.0
             
             setup_type_stats = {}
             total_duration = 0
             completed_trades = 0
-            total_profit_loss = 0.0
             
             timeframe_stats = {}
             coin_stats = {}
@@ -384,19 +444,29 @@ class TrackingService:
                     
                     tf = setup.get('timeframe', 'N/A')
                     if tf not in timeframe_stats:
-                        timeframe_stats[tf] = {'total': 0, 'wins': 0, 'losses': 0, 'pending': 0, 'breakeven': 0}
+                        timeframe_stats[tf] = {'total': 0, 'wins': 0, 'losses': 0, 'pending': 0, 'breakeven': 0, 'expired': 0}
                     timeframe_stats[tf]['total'] += 1
                     
-                    coin = setup.get('pair', 'UNKNOWN').replace('USDT', '')
+                    coin = setup.get('pair', 'UNKNOWN').replace('USDT', '').replace('/USDT:USDT', '')
                     if coin not in coin_stats:
-                        coin_stats[coin] = {'total': 0, 'wins': 0, 'losses': 0, 'pending': 0}
+                        coin_stats[coin] = {'total': 0, 'wins': 0, 'losses': 0, 'pending': 0, 'expired': 0}
                     coin_stats[coin]['total'] += 1
                     
                     if setup.get('duration_minutes'):
                         total_duration += setup['duration_minutes']
                         completed_trades += 1
                     
-                    if setup['result'] in ['WIN', 'PARTIAL_WIN']:
+                    result = setup.get('result')
+                    status = setup.get('status')
+                    
+                    # v2.2.8: EXPIRED status
+                    if status == 'EXPIRED':
+                        expired_setups += 1
+                        timeframe_stats[tf]['expired'] += 1
+                        coin_stats[coin]['expired'] += 1
+                        continue
+                    
+                    if result in ['WIN', 'PARTIAL_WIN']:
                         winning_trades += 1
                         total_profit_loss += setup.get('profit_loss', 0)
                         timeframe_stats[tf]['wins'] += 1
@@ -408,9 +478,9 @@ class TrackingService:
                         setup_type_stats[setup_type]['wins'] += 1
                         setup_type_stats[setup_type]['total'] += 1
                     
-                    elif setup['result'] == 'LOSS':
+                    elif result == 'LOSS':
                         losing_trades += 1
-                        total_profit_loss += setup['profit_loss']
+                        total_profit_loss += setup.get('profit_loss', 0)
                         timeframe_stats[tf]['losses'] += 1
                         coin_stats[coin]['losses'] += 1
                         
@@ -419,11 +489,11 @@ class TrackingService:
                             setup_type_stats[setup_type] = {'wins': 0, 'total': 0}
                         setup_type_stats[setup_type]['total'] += 1
                     
-                    elif setup['result'] == 'BREAKEVEN':
+                    elif result == 'BREAKEVEN':
                         breakeven_trades += 1
                         timeframe_stats[tf]['breakeven'] += 1
                     
-                    elif setup['status'] in ['PENDING', 'TP1']:
+                    elif status in ['PENDING', 'FILLED']:
                         pending_setups += 1
                         timeframe_stats[tf]['pending'] += 1
                         coin_stats[coin]['pending'] += 1
@@ -431,29 +501,26 @@ class TrackingService:
                 except Exception:
                     continue
             
-            # Win rate hesapla
             completed_count = winning_trades + losing_trades
             win_rate = (winning_trades / completed_count * 100) if completed_count > 0 else 0
             loss_rate = (losing_trades / completed_count * 100) if completed_count > 0 else 0
             
-            # Profit hesapla
             current_balance = starting_balance + total_profit_loss
             profit_percent = (total_profit_loss / starting_balance * 100) if starting_balance > 0 else 0
             
-            # Average duration
             avg_duration = (total_duration / completed_trades) if completed_trades > 0 else 0
             
             # Best setup type
             best_setup_type = "N/A"
             best_win_rate = 0
             for setup_type, stats in setup_type_stats.items():
-                if stats['total'] >= 3:  # En az 3 trade olsun
+                if stats['total'] >= MIN_TRADES_FOR_RANKING:
                     type_win_rate = (stats['wins'] / stats['total'] * 100)
                     if type_win_rate > best_win_rate:
                         best_win_rate = type_win_rate
                         best_setup_type = f"{setup_type}: {type_win_rate:.0f}%"
             
-            # v2.1.1: Coin breakdown with win rates
+            # Coin breakdown
             coin_breakdown = {}
             for coin, stats in coin_stats.items():
                 coin_completed = stats['wins'] + stats['losses']
@@ -464,20 +531,22 @@ class TrackingService:
                     'wins': stats['wins'],
                     'losses': stats['losses'],
                     'pending': stats['pending'],
+                    'expired': stats.get('expired', 0),
+                    'completed': coin_completed,
                     'win_rate': round(coin_win_rate, 1),
                     'loss_rate': round(coin_loss_rate, 1)
                 }
             
-            # v2.1.1: Top 5 coins (en yüksek win rate, en az 2 completed trade)
-            sorted_coins = sorted(
-                [(c, s) for c, s in coin_breakdown.items() if s['wins'] + s['losses'] >= 2],
-                key=lambda x: x[1]['win_rate'],
-                reverse=True
-            )
-            top_5_coins = sorted_coins[:5]
-            worst_5_coins = sorted_coins[-5:][::-1] if len(sorted_coins) >= 5 else sorted_coins[::-1]
+            # Top/Worst coins
+            coins_for_ranking = [(c, s) for c, s in coin_breakdown.items() if s['completed'] >= MIN_TRADES_FOR_RANKING]
             
-            # v2.1.1: Timeframe breakdown with win rates
+            sorted_coins_top = sorted(coins_for_ranking, key=lambda x: calculate_ranking_score(x[1]['win_rate'], x[1]['completed']), reverse=True)
+            top_5_coins = sorted_coins_top[:5]
+            
+            sorted_coins_worst = sorted(coins_for_ranking, key=lambda x: calculate_ranking_score(x[1]['win_rate'], x[1]['completed']))
+            worst_5_coins = sorted_coins_worst[:5]
+            
+            # Timeframe breakdown
             timeframe_breakdown = {}
             for tf, stats in timeframe_stats.items():
                 tf_completed = stats['wins'] + stats['losses']
@@ -489,18 +558,20 @@ class TrackingService:
                     'losses': stats['losses'],
                     'pending': stats['pending'],
                     'breakeven': stats['breakeven'],
+                    'expired': stats.get('expired', 0),
+                    'completed': tf_completed,
                     'win_rate': round(tf_win_rate, 1),
                     'loss_rate': round(tf_loss_rate, 1)
                 }
             
-            # v2.1.1: Top 5 timeframes (en yüksek win rate, en az 2 completed trade)
-            sorted_tfs = sorted(
-                [(tf, s) for tf, s in timeframe_breakdown.items() if s['wins'] + s['losses'] >= 2],
-                key=lambda x: x[1]['win_rate'],
-                reverse=True
-            )
-            top_5_timeframes = sorted_tfs[:5]
-            worst_5_timeframes = sorted_tfs[-5:][::-1] if len(sorted_tfs) >= 5 else sorted_tfs[::-1]
+            # Top/Worst timeframes
+            tfs_for_ranking = [(tf, s) for tf, s in timeframe_breakdown.items() if s['completed'] >= MIN_TRADES_FOR_RANKING]
+            
+            sorted_tfs_top = sorted(tfs_for_ranking, key=lambda x: calculate_ranking_score(x[1]['win_rate'], x[1]['completed']), reverse=True)
+            top_5_timeframes = sorted_tfs_top[:5]
+            
+            sorted_tfs_worst = sorted(tfs_for_ranking, key=lambda x: calculate_ranking_score(x[1]['win_rate'], x[1]['completed']))
+            worst_5_timeframes = sorted_tfs_worst[:5]
             
             result = {
                 'total_setups': total_setups,
@@ -508,6 +579,7 @@ class TrackingService:
                 'losing_trades': losing_trades,
                 'breakeven_trades': breakeven_trades,
                 'pending_setups': pending_setups,
+                'expired_setups': expired_setups,  # v2.2.8
                 'win_rate': round(win_rate, 1),
                 'loss_rate': round(loss_rate, 1),
                 'starting_balance': starting_balance,
@@ -518,21 +590,21 @@ class TrackingService:
                 'avg_duration_minutes': round(avg_duration, 1),
                 'timeframe_breakdown': timeframe_breakdown,
                 'coin_breakdown': coin_breakdown,
-                # v2.1.1: Top/Worst 5
                 'top_5_coins': top_5_coins,
                 'worst_5_coins': worst_5_coins,
                 'top_5_timeframes': top_5_timeframes,
                 'worst_5_timeframes': worst_5_timeframes,
             }
             
-            logger.info(f"📊 Aggregate stats: {winning_trades}W/{losing_trades}L/{breakeven_trades}BE/{pending_setups}P ({win_rate:.1f}%)")
+            logger.info(f"📊 Stats: {winning_trades}W/{losing_trades}L/{breakeven_trades}BE/{pending_setups}P/{expired_setups}E ({win_rate:.1f}%)")
             return result
             
         except Exception as e:
             logger.error(f"❌ Get aggregate stats error: {e}")
             return {
                 'total_setups': 0, 'winning_trades': 0, 'losing_trades': 0,
-                'breakeven_trades': 0, 'pending_setups': 0, 'win_rate': 0, 'loss_rate': 0,
+                'breakeven_trades': 0, 'pending_setups': 0, 'expired_setups': 0,
+                'win_rate': 0, 'loss_rate': 0,
                 'starting_balance': real_balance or 500.0, 'current_balance': real_balance or 500.0,
                 'profit': 0, 'profit_percent': 0, 'best_setup_type': 'N/A',
                 'avg_duration_minutes': 0, 'timeframe_breakdown': {}, 'coin_breakdown': {},

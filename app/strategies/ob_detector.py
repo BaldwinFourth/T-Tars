@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.1.3
+T-TARS OB Detector v2.2.5
 =========================
 Order Block setup detection (Scanning + Validation)
+
+v2.2.5:
+- NEW: Entry distance filter - Entry, current price'tan max %3 uzakta olabilir
+- Bu sayede uzak zone'lara emir verilmez ve TP/SL hataları önlenir
 
 v2.1.3:
 - REMOVED: Config.DEFAULT_BALANCE referansi (risk hesabi okx_service'te)
@@ -34,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 # Volume threshold - 0.5x ve üzeri kabul edilir
 VOLUME_THRESHOLD = 0.5
+
+# v2.2.5: Entry distance filter - max %3 uzaklık
+MAX_ENTRY_DISTANCE_PERCENT = 3.0
 
 
 # --- SCANNING LOGIC (GÖZLER) ---
@@ -97,12 +104,19 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         
         # Volume kontrolü (threshold: 0.5x)
         if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} OB LONG rejected: Low Volume ({vol_ratio}x < {VOLUME_THRESHOLD}x)")
+            logger.info(f"{coin} OB LONG rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
             return None
         
         # Entry = OB mid-point
         entry_price = (ob['low'] + ob['high']) / 2
         entry_zone = f"{format_price(ob['low'])} - {format_price(ob['high'])}"
+        
+        # v2.2.5: Entry distance kontrolü
+        if current_price > 0:
+            distance_percent = abs(entry_price - current_price) / current_price * 100
+            if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
+                logger.info(f"{coin} OB LONG rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                return None
         
         # Stop = Entry - ATR (1R risk)
         stop_price = entry_price - atr
@@ -167,12 +181,19 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         
         # Volume kontrolü (threshold: 0.5x)
         if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} OB SHORT rejected: Low Volume ({vol_ratio}x < {VOLUME_THRESHOLD}x)")
+            logger.info(f"{coin} OB SHORT rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
             return None
         
         # Entry = OB mid-point
         entry_price = (ob['low'] + ob['high']) / 2
         entry_zone = f"{format_price(ob['low'])} - {format_price(ob['high'])}"
+        
+        # v2.2.5: Entry distance kontrolü
+        if current_price > 0:
+            distance_percent = abs(entry_price - current_price) / current_price * 100
+            if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
+                logger.info(f"{coin} OB SHORT rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                return None
         
         # Stop = Entry + ATR (1R risk)
         stop_price = entry_price + atr

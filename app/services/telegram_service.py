@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Service v2.0.3
+T-TARS Telegram Service v2.2.1
 ==============================
 Telegram Bot API wrapper
 
+v2.2.1:
+- FIX: Markdown parse hatası olursa plain text'e fallback
+- CHANGED: parse_mode önce Markdown dene, hata olursa None
+
 v2.0.3:
-- Sürüm güncellemesi (Mantıksal değişiklik yok)
+- Sürüm güncellemesi
 
 v2.0.0:
 - broadcast() kaldırıldı
 - send_signal() sadece TELEGRAM_CHAT_ID'ye gönderir
-- Beta group desteği kaldırıldı
 """
 
 import requests
@@ -27,18 +30,18 @@ class TelegramService:
         self.token = Config.TELEGRAM_BOT_TOKEN
         self.chat_id = Config.TELEGRAM_CHAT_ID
         self.base_url = f"https://api.telegram.org/bot{self.token}"
-        logger.info("✅ Telegram Service initialized")
+        logger.info("✅ Telegram Service initialized (v2.2.1)")
     
     def send(self, message, chat_id=None):
         """
         Mesaj gönder
-        chat_id belirtilmezse default (kişisel) chat'e gönderir
+        v2.2.1: Markdown hata verirse plain text dene
         """
         target_chat = chat_id or self.chat_id
+        url = f"{self.base_url}/sendMessage"
         
+        # Önce Markdown ile dene
         try:
-            url = f"{self.base_url}/sendMessage"
-            
             payload = {
                 "chat_id": target_chat,
                 "text": message,
@@ -53,6 +56,34 @@ class TelegramService:
             )
             response.raise_for_status()
             return True
+            
+        except requests.exceptions.HTTPError as e:
+            # 400 Bad Request = muhtemelen Markdown hatası
+            if "400" in str(e):
+                logger.warning(f"⚠️ Markdown parse hatası, plain text deneniyor...")
+                try:
+                    # Plain text olarak tekrar dene
+                    payload_plain = {
+                        "chat_id": target_chat,
+                        "text": message
+                        # parse_mode yok = plain text
+                    }
+                    response = requests.post(
+                        url,
+                        json=payload_plain,
+                        timeout=10,
+                        headers={'Content-Type': 'application/json; charset=utf-8'}
+                    )
+                    response.raise_for_status()
+                    logger.info("✅ Plain text ile gönderildi")
+                    return True
+                except Exception as e2:
+                    logger.error(f"❌ Plain text de başarısız: {e2}")
+                    return False
+            else:
+                logger.error(f"❌ Telegram send error (chat: {target_chat}): {e}")
+                return False
+                
         except Exception as e:
             logger.error(f"❌ Telegram send error (chat: {target_chat}): {e}")
             return False
@@ -60,6 +91,5 @@ class TelegramService:
     def send_signal(self, message):
         """
         v2.0.0: Sinyal mesajlarını SADECE ana chat'e gönder
-        Broadcast kaldırıldı - beta group yok artık
         """
         return self.send(message, chat_id=self.chat_id)

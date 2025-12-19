@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.3.8
-=========================
+T-TARS Trading Bot v2.3.10
+==========================
 Main Flask application with routes.
+
+v2.3.10:
+- FIX: python_score hesaplaması düzeltildi
+- CHANGED: setup_strength hem ob_strength hem fvg_strength'den okunuyor
 
 v2.3.8:
 - FIX: MARKET_CACHE_TTL 300→1200 (20 dakika) - HTF verisi expire olmuyordu
@@ -606,9 +610,11 @@ def auto_analyze():
                             continue
                         
                         # 3. Python puanı hesapla
+                        # v2.3.10: OB için ob_strength, FVG için fvg_strength
+                        setup_strength = setup.get('ob_strength') or setup.get('fvg_strength', 'medium')
                         python_score = calculate_setup_strength(
                             volume_spike_ratio=setup.get('volume_spike_ratio', 0),
-                            ob_or_fvg_strength=setup.get('ob_strength', 'medium'),
+                            ob_or_fvg_strength=setup_strength,
                             rr_ratio=setup.get('rr_ratio', 0),
                             confidence=setup.get('confidence', 'MEDIUM')
                         )

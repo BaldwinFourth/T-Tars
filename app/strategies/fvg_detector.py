@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.3.8
-==========================
+T-TARS FVG Detector v2.3.10
+===========================
 Fair Value Gap setup detection (Scanning + Validation)
+
+v2.3.10:
+- FIX: Return dict'e volume_spike_ratio ve fvg_strength eklendi
+- Bu sayede main.py'de python_score doğru hesaplanacak
 
 v2.3.8:
 - CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
@@ -189,6 +193,8 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
+            'volume_spike_ratio': vol_ratio,
+            'fvg_strength': fvg_strength,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
             'tp1': format_price(tp1_price),
             'tp2': format_price(tp2_price),
@@ -273,6 +279,8 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
+            'volume_spike_ratio': vol_ratio,
+            'fvg_strength': fvg_strength,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
             'tp1': format_price(tp1_price),
             'tp2': format_price(tp2_price),

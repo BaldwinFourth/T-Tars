@@ -1,4 +1,31 @@
-# T-TARS v2.3.9 - EXPAND Fix
+# T-TARS v2.3.10 - (2025-12-19)
+
+## 🔧 Değişiklikler
+
+### OB/FVG Detector - Return Dict Fix
+- **FIX:** `volume_spike_ratio` return dict'e eklendi
+- **FIX:** `ob_strength` / `fvg_strength` return dict'e eklendi
+- Artık main.py'de doğru değerler okunuyor
+
+### Main.py - Setup Strength Fix
+- **FIX:** `setup_strength` hem `ob_strength` hem `fvg_strength`'den okunuyor
+- OB setup → ob_strength kullanır
+- FVG setup → fvg_strength kullanır
+
+### Sonuç
+- Python Score artık doğru hesaplanacak (0.46 yerine ~0.70+)
+- Daha fazla setup ENTER alacak
+
+### 📁 Değişen Dosyalar
+- `main.py`
+- `ob_detector.py`
+- `fvg_detector.py`
+
+---
+**Deploy:** 3 dosya değişti
+
+---
+# T-TARS v2.3.9 - (2025-12-19)
 
 ## 🔧 Değişiklikler
 
@@ -19,7 +46,7 @@
 
 ---
 
-## v2.3.8 (2024-12-19)
+## v2.3.8 (2025-12-19)
 
 ### 🔧 DRY Refactoring - Tek Yerden Yönetim
 - **calculators.py**: Tüm threshold'lar ve score'lar merkezi olarak tanımlandı

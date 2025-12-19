@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.3.8
-=========================
+T-TARS OB Detector v2.3.10
+==========================
 Order Block setup detection (Scanning + Validation)
+
+v2.3.10:
+- FIX: Return dict'e volume_spike_ratio ve ob_strength eklendi
+- Bu sayede main.py'de python_score doğru hesaplanacak
 
 v2.3.8:
 - CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
@@ -177,6 +181,8 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
+            'volume_spike_ratio': vol_ratio,
+            'ob_strength': ob_strength,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
             'tp1': format_price(tp1_price),
@@ -260,6 +266,8 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
+            'volume_spike_ratio': vol_ratio,
+            'ob_strength': ob_strength,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
             'tp1': format_price(tp1_price),

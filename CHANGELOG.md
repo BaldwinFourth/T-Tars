@@ -1,4 +1,23 @@
-# T-TARS Trading Bot - Changelog
+# T-TARS v2.3.9 - EXPAND Fix
+
+## 🔧 Değişiklikler
+
+### Claude Service - EXPAND Algı Düzeltmesi
+- **FIX:** Stop EXPAND artık risk olarak algılanmıyor
+- **CHANGED:** `⚠️ STOP ADJUSTMENT YAPILDI` → `ℹ️ STOP/TP OPTİMİZASYONU (EXPAND)`
+- **ADDED:** EXPAND için pozitif açıklama: "R:R korundu, trade kalitesi değişmedi"
+
+### Mantık
+- Stop genişlerse TP de orantılı genişler
+- R:R 2.0 → 2.0 kalır (değişmez)
+- Bu bir risk DEĞİL, güvenlik optimizasyonu
+
+### 📁 Değişen Dosyalar
+- `claude_service.py` - Prompt adjustment bilgisi güncellendi
+
+**Deploy:** Sadece `claude_service.py` değişti
+
+---
 
 ## v2.3.8 (2024-12-19)
 

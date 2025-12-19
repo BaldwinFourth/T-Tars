@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.3.8
+T-TARS Claude Service v2.3.9
 ============================
 Claude AI API wrapper for market analysis and setup evaluation.
+
+v2.3.9:
+- FIX: EXPAND adjustment artık risk olarak algılanmıyor
+- CHANGED: "⚠️ STOP ADJUSTMENT" → "ℹ️ STOP/TP OPTİMİZASYONU"
+- ADDED: EXPAND için pozitif açıklama (R:R korundu notu)
 
 v2.3.8:
 - CHANGED: Volume threshold'lar calculators.py'den import ediliyor (DRY)
@@ -559,16 +564,26 @@ class ClaudeService:
             if python_score:
                 score_info += f"- Python Score: {python_score:.2f}/1.0 ({python_score*100:.0f}/100)\n"
             
-            # Adjustment bilgisi
+            # Adjustment bilgisi - v2.3.9: EXPAND pozitif algı
             adjustment_info = ""
             if adjustment_result['adjusted']:
-                adjustment_info = f"""
-## ⚠️ STOP ADJUSTMENT YAPILDI:
-- Adjustment Type: {adjustment_result['adjustment_type']}
+                adj_type = adjustment_result['adjustment_type']
+                if adj_type == 'EXPAND':
+                    # EXPAND = Stop ve TP orantılı genişletildi, R:R AYNI kaldı = İYİ
+                    adjustment_info = f"""
+## ℹ️ STOP/TP OPTİMİZASYONU (EXPAND):
+- Stop %{adjustment_result['original_stop_pct']:.2f} → %{adjustment_result['new_stop_pct']:.2f} (minimum mesafeye genişletildi)
+- TP de orantılı genişletildi (R:R korundu)
+- R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f} (AYNI)
+- NOT: Bu bir risk DEĞİL, güvenlik optimizasyonu. R:R aynı kaldığı için trade kalitesi değişmedi.
+"""
+                else:
+                    # SHRINK veya AGGRESSIVE için eski format
+                    adjustment_info = f"""
+## ℹ️ STOP/TP AYARLANDI ({adj_type}):
 - Orijinal Stop: %{adjustment_result['original_stop_pct']:.2f}
 - Yeni Stop: %{adjustment_result['new_stop_pct']:.2f}
-- Orijinal R:R: {adjustment_result['original_rr']:.2f}
-- Yeni R:R: {adjustment_result['new_rr']:.2f}
+- R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f}
 """
             
             # v2.3.8: Volume threshold'lar calculators'tan (DRY)

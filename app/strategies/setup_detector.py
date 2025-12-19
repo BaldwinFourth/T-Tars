@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v2.0.9
+T-TARS Setup Detector v2.1.0
 ============================
 Trading setup orchestrator.
+
+v2.1.0:
+- FIX: TIMEFRAMES artık Config'den alınıyor (tutarlılık)
+- bitget_service.py ile aynı TF listesi kullanılıyor
+- 2h ve 3m kaldırıldı (veri toplanmayan TF'ler)
 
 v2.0.9:
 - FIX: TIMEFRAMES listesinde virgül hatası düzeltildi ('1d' '4h' -> '1d', '4h')
@@ -12,14 +17,15 @@ v2.0.9:
 """
 
 import logging
+from app.config import Config
 from app.strategies.ob_detector import detect_ob_long, detect_ob_short
 from app.strategies.fvg_detector import detect_fvg_long, detect_fvg_short
 from app.strategies.volume_analyzer import select_best_volume
 
 logger = logging.getLogger(__name__)
 
-# v2.0.9: Düzeltilmiş Timeframe listesi (10m kaldırıldı, virgül düzeltildi)
-TIMEFRAMES = ['4h', '2h', '1h', '30m', '15m', '5m', '3m']
+# v2.1.0: Config'den al - bitget_service ile tutarlı
+TIMEFRAMES = Config.TIMEFRAMES  # ['4h', '1h', '30m', '15m', '5m']
 
 
 def detect_trading_setup(pair, market_data):

@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Volume Analyzer v2.0.9
+T-TARS Volume Analyzer v2.3.8
 =============================
 Volume spike detection ve analiz
+
+v2.3.8:
+- CHANGED: TRADEABLE_THRESHOLD kaldırıldı, calculators.VOLUME_TRADEABLE_MIN kullanılıyor (DRY)
+- Tüm volume threshold'lar tek yerden yönetiliyor
+
+v2.3.7:
+- ADD: Webhook volume storage (store_volume, get_volume, get_all_volumes)
+- ADD: 2 saat expiry ile otomatik temizlik
+- ADD: cleanup_expired_volumes() fonksiyonu
 
 v2.0.9:
 - FIX: 10m timeframe kaldırıldı (OKX desteklemiyor)
@@ -11,12 +20,131 @@ v2.0.9:
 """
 
 import logging
+import time
+
+# v2.3.8: Threshold'ları calculators'tan al (DRY)
+from app.strategies.calculators import VOLUME_TRADEABLE_MIN
 
 logger = logging.getLogger(__name__)
 
-# Volume threshold - 0.5x ve üzeri tradeable
-TRADEABLE_THRESHOLD = 0.5
+# Expiry süresi (saniye) - 2 saat
+VOLUME_EXPIRY_SECONDS = 2 * 60 * 60
 
+
+# ============================================
+# WEBHOOK VOLUME STORAGE (v2.3.7)
+# ============================================
+
+_VOLUME_STORE = {}
+
+
+def store_volume(pair: str, tf: str, spike: float, atr: float) -> None:
+    """
+    Webhook'tan gelen volume verisini sakla.
+    
+    Args:
+        pair: "BTCUSDT", "ETHUSDT", etc.
+        tf: "5m", "15m", "30m", "1h"
+        spike: Volume spike ratio (0.0 - 10.0+)
+        atr: ATR değeri
+    """
+    key = f"{pair}_{tf}"
+    _VOLUME_STORE[key] = {
+        'spike': spike,
+        'atr': atr,
+        'timestamp': time.time()
+    }
+    logger.debug(f"📊 Volume stored: {key} = {spike:.2f}x, ATR={atr:.6g}")
+
+
+def get_volume(pair: str, tf: str) -> dict:
+    """
+    Belirli pair ve timeframe için volume verisi döndür.
+    
+    Args:
+        pair: "BTCUSDT", "ETHUSDT", etc.
+        tf: "5m", "15m", "30m", "1h"
+    
+    Returns:
+        dict: {'spike': float, 'atr': float, 'timestamp': float} veya boş dict
+    """
+    key = f"{pair}_{tf}"
+    data = _VOLUME_STORE.get(key)
+    
+    if not data:
+        return {'spike': 0.0, 'atr': 0.0}
+    
+    # Expiry kontrolü
+    age = time.time() - data.get('timestamp', 0)
+    if age > VOLUME_EXPIRY_SECONDS:
+        logger.debug(f"📊 Volume expired: {key} (age={age/60:.1f}m)")
+        del _VOLUME_STORE[key]
+        return {'spike': 0.0, 'atr': 0.0}
+    
+    return data
+
+
+def get_all_volumes(pair: str) -> dict:
+    """
+    Bir pair'in tüm timeframe'leri için volume verisi döndür.
+    
+    Args:
+        pair: "BTCUSDT", "ETHUSDT", etc.
+    
+    Returns:
+        dict: {'5m': {...}, '15m': {...}, '30m': {...}, '1h': {...}}
+    """
+    result = {}
+    for tf in ['5m', '15m', '30m', '1h']:
+        result[tf] = get_volume(pair, tf)
+    return result
+
+
+def cleanup_expired_volumes() -> int:
+    """
+    Süresi dolmuş volume verilerini temizle.
+    
+    Returns:
+        int: Silinen kayıt sayısı
+    """
+    now = time.time()
+    expired_keys = []
+    
+    for key, data in _VOLUME_STORE.items():
+        age = now - data.get('timestamp', 0)
+        if age > VOLUME_EXPIRY_SECONDS:
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del _VOLUME_STORE[key]
+    
+    if expired_keys:
+        logger.info(f"🧹 Volume cleanup: {len(expired_keys)} expired entries removed")
+    
+    return len(expired_keys)
+
+
+def get_volume_store_stats() -> dict:
+    """
+    Volume store istatistiklerini döndür (debug için).
+    
+    Returns:
+        dict: {'total': int, 'pairs': list}
+    """
+    pairs = set()
+    for key in _VOLUME_STORE.keys():
+        pair = key.rsplit('_', 1)[0]
+        pairs.add(pair)
+    
+    return {
+        'total': len(_VOLUME_STORE),
+        'pairs': list(pairs)
+    }
+
+
+# ============================================
+# MEVCUT FONKSİYONLAR (v2.0.9)
+# ============================================
 
 def has_volume_spike(volume_data):
     """
@@ -128,8 +256,8 @@ def analyze_volume(market_data, timeframe):
         strength = get_volume_strength(volume)
         trend = get_volume_trend(volume)
         
-        # Tradeable: Spike var veya ratio threshold üstünde (0.5x)
-        tradeable = has_spike or spike_ratio >= TRADEABLE_THRESHOLD
+        # v2.3.8: Tradeable threshold calculators'tan (DRY)
+        tradeable = has_spike or spike_ratio >= VOLUME_TRADEABLE_MIN
         
         logger.debug(f"📊 Volume [{timeframe}]: Ratio={spike_ratio:.2f}x, Spike={has_spike}, Tradeable={tradeable}")
         

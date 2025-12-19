@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.2.5
+T-TARS OB Detector v2.3.8
 =========================
 Order Block setup detection (Scanning + Validation)
 
+v2.3.8:
+- CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
+- CHANGED: Volume log format .2f → .4f (hassas okuma)
+
+v2.2.7:
+- ADD: Log mesajlarına [timeframe] eklendi (debug için)
+- FIX: Confidence artık dinamik hesaplanıyor (calculate_setup_strength)
+- FIX: Hardcoded 'HIGH' kaldırıldı
+
+v2.2.6:
+- FIX: R:R floating point karşılaştırma hatası düzeltildi
+
 v2.2.5:
 - NEW: Entry distance filter - Entry, current price'tan max %3 uzakta olabilir
-- Bu sayede uzak zone'lara emir verilmez ve TP/SL hataları önlenir
-
-v2.1.3:
-- REMOVED: Config.DEFAULT_BALANCE referansi (risk hesabi okx_service'te)
-- REMOVED: Config.RISK_PER_TRADE_MIN/MAX referansi
-- REMOVED: detailed_explanation'dan risk_usd bilgisi
-- CLEAN: Sadece setup detection, risk hesabi yok
-
-v2.1.0:
-- FIX: Entry hesabı düzeltildi → (OB_Low + OB_High) / 2
-- FIX: Stop hesabı düzeltildi → Entry ± ATR (OB'den değil, Entry'den)
-- FIX: scan_order_blocks key'leri tutarlı hale getirildi (high/low)
 
 Formül (Kadircan):
 LONG:  Entry = (OB_H + OB_L) / 2, Stop = Entry - ATR, TP1 = Entry + 2*ATR, TP2 = Entry + 4*ATR
@@ -30,14 +30,12 @@ from app.strategies.calculators import (
     format_price,
     MIN_RR_RATIO,
     TP1_MULTIPLIER,
-    TP2_MULTIPLIER
+    TP2_MULTIPLIER,
+    VOLUME_TRADEABLE_MIN  # v2.3.8: DRY - tek yerden yönetim
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
-
-# Volume threshold - 0.5x ve üzeri kabul edilir
-VOLUME_THRESHOLD = 0.5
 
 # v2.2.5: Entry distance filter - max %3 uzaklık
 MAX_ENTRY_DISTANCE_PERCENT = 3.0
@@ -95,6 +93,18 @@ def scan_order_blocks(ohlcv, timeframe_str):
         return []
 
 
+def _get_confidence_label(strength_score):
+    """
+    v2.2.7: Strength score'dan confidence label üret
+    """
+    if strength_score >= 0.8:
+        return 'HIGH'
+    elif strength_score >= 0.5:
+        return 'MEDIUM'
+    else:
+        return 'LOW'
+
+
 # --- VALIDATION LOGIC (BEYİN) ---
 def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
     """Bullish Order Block setup onayı"""
@@ -102,9 +112,9 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
         
-        # Volume kontrolü (threshold: 0.5x)
-        if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} OB LONG rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
+        # v2.3.8: Volume kontrolü - VOLUME_TRADEABLE_MIN calculators'tan (DRY)
+        if not volume.get('spike', False) and vol_ratio < VOLUME_TRADEABLE_MIN:
+            logger.info(f"{coin} OB LONG [{timeframe}] rejected: Low Volume ({vol_ratio:.4f}x < {VOLUME_TRADEABLE_MIN}x)")
             return None
         
         # Entry = OB mid-point
@@ -115,7 +125,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
-                logger.info(f"{coin} OB LONG rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                logger.info(f"{coin} OB LONG [{timeframe}] rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
                 return None
         
         # Stop = Entry - ATR (1R risk)
@@ -131,25 +141,30 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         reward = abs(tp1_price - entry_price)  # = 2*ATR
         rr_ratio = reward / risk if risk > 0 else 0  # = 2.0
         
-        # R:R kontrolü
-        if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"{coin} OB LONG rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
+        # v2.2.6 FIX: R:R kontrolü - floating point toleransı
+        if round(rr_ratio, 2) < MIN_RR_RATIO:
+            logger.info(f"{coin} OB LONG [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
+        # v2.2.7: Dinamik confidence hesapla
+        ob_strength = ob.get('strength', 'medium')
+        strength_score = calculate_setup_strength(vol_ratio, ob_strength, rr_ratio, 'MEDIUM')
+        confidence = _get_confidence_label(strength_score)
+        
+        # v2.3.8: Volume format .4f
         detailed_explanation = f"""
 📊 **OB Analizi (LONG):**
 • Zone: {entry_zone}
-• TF: {timeframe.upper()} | Vol: {vol_ratio:.2f}x
+• TF: {timeframe.upper()} | Vol: {vol_ratio:.4f}x | Score: {strength_score:.2f}
 
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f}
+• R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
-        logger.info(f"✅ {coin} OB LONG VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
+        logger.info(f"✅ {coin} OB LONG [{timeframe}] VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.4f}x, Conf={confidence}")
         
         return {
             'type': 'OB + Volume (LONG)',
@@ -160,7 +175,8 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'rr_ratio': rr_ratio,
-            'confidence': 'HIGH',
+            'confidence': confidence,
+            'strength_score': strength_score,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
             'tp1': format_price(tp1_price),
@@ -179,9 +195,9 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
         
-        # Volume kontrolü (threshold: 0.5x)
-        if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} OB SHORT rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
+        # v2.3.8: Volume kontrolü - VOLUME_TRADEABLE_MIN calculators'tan (DRY)
+        if not volume.get('spike', False) and vol_ratio < VOLUME_TRADEABLE_MIN:
+            logger.info(f"{coin} OB SHORT [{timeframe}] rejected: Low Volume ({vol_ratio:.4f}x < {VOLUME_TRADEABLE_MIN}x)")
             return None
         
         # Entry = OB mid-point
@@ -192,7 +208,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
-                logger.info(f"{coin} OB SHORT rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                logger.info(f"{coin} OB SHORT [{timeframe}] rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
                 return None
         
         # Stop = Entry + ATR (1R risk)
@@ -208,25 +224,30 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         reward = abs(entry_price - tp1_price)  # = 2*ATR
         rr_ratio = reward / risk if risk > 0 else 0  # = 2.0
         
-        # R:R kontrolü
-        if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"{coin} OB SHORT rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
+        # v2.2.6 FIX: R:R kontrolü - floating point toleransı
+        if round(rr_ratio, 2) < MIN_RR_RATIO:
+            logger.info(f"{coin} OB SHORT [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
+        # v2.2.7: Dinamik confidence hesapla
+        ob_strength = ob.get('strength', 'medium')
+        strength_score = calculate_setup_strength(vol_ratio, ob_strength, rr_ratio, 'MEDIUM')
+        confidence = _get_confidence_label(strength_score)
+        
+        # v2.3.8: Volume format .4f
         detailed_explanation = f"""
 📊 **OB Analizi (SHORT):**
 • Zone: {entry_zone}
-• TF: {timeframe.upper()} | Vol: {vol_ratio:.2f}x
+• TF: {timeframe.upper()} | Vol: {vol_ratio:.4f}x | Score: {strength_score:.2f}
 
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f}
+• R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
-        logger.info(f"✅ {coin} OB SHORT VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
+        logger.info(f"✅ {coin} OB SHORT [{timeframe}] VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.4f}x, Conf={confidence}")
         
         return {
             'type': 'OB + Volume (SHORT)',
@@ -237,7 +258,8 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'rr_ratio': rr_ratio,
-            'confidence': 'HIGH',
+            'confidence': confidence,
+            'strength_score': strength_score,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
             'tp1': format_price(tp1_price),

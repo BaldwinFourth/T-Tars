@@ -1,27 +1,29 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.2.5
+T-TARS FVG Detector v2.3.8
 ==========================
 Fair Value Gap setup detection (Scanning + Validation)
 
+v2.3.8:
+- CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
+- CHANGED: Volume log format .2f → .4f (hassas okuma)
+
+v2.2.7:
+- ADD: Log mesajlarına [timeframe] eklendi (debug için)
+- FIX: Confidence artık dinamik hesaplanıyor (calculate_setup_strength)
+- FIX: Hardcoded 'MEDIUM' kaldırıldı
+
+v2.2.6:
+- FIX: R:R floating point karşılaştırma hatası düzeltildi
+
 v2.2.5:
 - NEW: Entry distance filter - Entry, current price'tan max %3 uzakta olabilir
-- Bu sayede uzak zone'lara emir verilmez ve TP/SL hataları önlenir
-
-v2.1.3:
-- REMOVED: Config.DEFAULT_BALANCE referansi (risk hesabi okx_service'te)
-- REMOVED: Config.RISK_PER_TRADE_MIN/MAX referansi
-- REMOVED: detailed_explanation'dan risk_usd bilgisi
-- CLEAN: Sadece setup detection, risk hesabi yok
-
-v2.1.0:
-- FIX: Entry hesabı düzeltildi → gap_high - (sum * 0.2146) [LONG]
-- FIX: Entry hesabı düzeltildi → gap_low + (sum * 0.2146) [SHORT]
-- FIX: Stop hesabı düzeltildi → Entry ± ATR
 
 Formül (Kadircan):
-LONG:  Entry = gap_high - (((gap_high + gap_low)/100) * 21.46), Stop = Entry - ATR
-SHORT: Entry = gap_low + (((gap_high + gap_low)/100) * 21.46), Stop = Entry + ATR
+Gap Size = Gap High - Gap Low
+Entry = Gap içinde (genelde mid-point)
+LONG:  Stop = Entry - ATR, TP1 = Entry + 2*ATR, TP2 = Entry + 4*ATR
+SHORT: Stop = Entry + ATR, TP1 = Entry - 2*ATR, TP2 = Entry - 4*ATR
 """
 
 import logging
@@ -30,99 +32,117 @@ from app.strategies.calculators import (
     format_price,
     MIN_RR_RATIO,
     TP1_MULTIPLIER,
-    TP2_MULTIPLIER
+    TP2_MULTIPLIER,
+    VOLUME_TRADEABLE_MIN  # v2.3.8: DRY - tek yerden yönetim
 )
+from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
-
-# Volume threshold - 0.5x ve üzeri kabul edilir
-VOLUME_THRESHOLD = 0.5
-
-# FVG Entry oranı (Kadircan formülü)
-FVG_ENTRY_RATIO = 21.46
 
 # v2.2.5: Entry distance filter - max %3 uzaklık
 MAX_ENTRY_DISTANCE_PERCENT = 3.0
 
 
-# --- SCANNING LOGIC ---
+# --- SCANNING LOGIC (GÖZLER) ---
 def scan_fair_value_gaps(ohlcv, timeframe_str):
-    """Mum verilerini tarayarak FVG'leri bulur."""
+    """
+    Mum verilerini tarayarak potansiyel FVG'leri bulur.
+    """
     fvgs = []
     try:
         if len(ohlcv) < 5:
             logger.debug(f"FVG Scan [{timeframe_str}]: Yetersiz mum ({len(ohlcv)})")
             return []
         
-        # Son 50 mum
-        data = ohlcv[-50:]
+        # Son 50 muma bakmak yeterli
+        lookback_data = ohlcv[-50:]
         
-        for i in range(1, len(data)-1):
-            prev = data[i-1]  # Mum 1
-            curr = data[i]    # Mum 2 (Gap olan)
-            next_candle = data[i+1]  # Mum 3
+        # Mum yapısı: [timestamp, open, high, low, close, volume]
+        for i in range(1, len(lookback_data)-1):
+            prev = lookback_data[i-1]
+            curr = lookback_data[i]
+            next_candle = lookback_data[i+1]
             
-            # Bullish FVG: Mum 1 High < Mum 3 Low
-            if next_candle[3] > prev[2] and curr[4] > curr[1]:  # Yeşil mum
-                gap_size = next_candle[3] - prev[2]
+            # Bullish FVG: 1. mumun high'ı ile 3. mumun low'u arasında boşluk
+            if next_candle[3] > prev[2]:  # 3. mum low > 1. mum high
+                gap_low = prev[2]    # 1. mumun high'ı
+                gap_high = next_candle[3]  # 3. mumun low'u
+                gap_size = gap_high - gap_low
+                
                 if gap_size > 0:
                     fvgs.append({
                         'type': 'bullish',
-                        'gap_low': prev[2],
-                        'gap_high': next_candle[3],
+                        'high': gap_high,
+                        'low': gap_low,
                         'gap_size': gap_size,
-                        'volume_confirmed': True
+                        'strength': 'high' if gap_size > (curr[2] - curr[3]) * 0.5 else 'medium'
                     })
             
-            # Bearish FVG: Mum 1 Low > Mum 3 High
-            elif next_candle[2] < prev[3] and curr[4] < curr[1]:  # Kırmızı mum
-                gap_size = prev[3] - next_candle[2]
+            # Bearish FVG: 1. mumun low'u ile 3. mumun high'ı arasında boşluk
+            if next_candle[2] < prev[3]:  # 3. mum high < 1. mum low
+                gap_high = prev[3]   # 1. mumun low'u
+                gap_low = next_candle[2]  # 3. mumun high'ı
+                gap_size = gap_high - gap_low
+                
                 if gap_size > 0:
                     fvgs.append({
                         'type': 'bearish',
-                        'gap_low': next_candle[2],
-                        'gap_high': prev[3],
+                        'high': gap_high,
+                        'low': gap_low,
                         'gap_size': gap_size,
-                        'volume_confirmed': True
+                        'strength': 'high' if gap_size > (curr[2] - curr[3]) * 0.5 else 'medium'
                     })
         
         if fvgs:
             logger.debug(f"📊 FVG Scan [{timeframe_str}]: {len(fvgs)} FVG bulundu")
         
-        return fvgs[-5:]
+        return fvgs[-5:]  # Son 5 FVG'yi döndür
         
     except Exception as e:
         logger.error(f"❌ FVG Scan Error [{timeframe_str}]: {e}")
         return []
 
 
-# --- VALIDATION LOGIC ---
+def _get_confidence_label(strength_score):
+    """
+    v2.2.7: Strength score'dan confidence label üret
+    """
+    if strength_score >= 0.8:
+        return 'HIGH'
+    elif strength_score >= 0.5:
+        return 'MEDIUM'
+    else:
+        return 'LOW'
+
+
+# --- VALIDATION LOGIC (BEYİN) ---
 def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
-    """Bullish FVG setup validasyonu"""
+    """Bullish FVG setup onayı"""
     try:
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
         
-        # Volume kontrolü (threshold: 0.5x)
-        if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} FVG LONG rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
+        # v2.3.8: Volume kontrolü - VOLUME_TRADEABLE_MIN calculators'tan (DRY)
+        if not volume.get('spike', False) and vol_ratio < VOLUME_TRADEABLE_MIN:
+            logger.info(f"{coin} FVG LONG [{timeframe}] rejected: Low Volume ({vol_ratio:.4f}x < {VOLUME_TRADEABLE_MIN}x)")
             return None
         
-        gap_high = fvg['gap_high']
-        gap_low = fvg['gap_low']
+        gap_low = fvg['low']
+        gap_high = fvg['high']
         
-        # Entry = gap_high - (((gap_high + gap_low) / 100) * 21.46)
-        entry_price = gap_high - (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
+        # Entry = Gap mid-point
+        entry_price = (gap_low + gap_high) / 2
         
         # v2.2.5: Entry distance kontrolü
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
-                logger.info(f"{coin} FVG LONG rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                logger.info(f"{coin} FVG LONG [{timeframe}] rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
                 return None
         
         # Stop = Entry - ATR (1R risk)
         stop_price = entry_price - atr
+        stop_loss = format_price(stop_price)
         
         # TP1 = Entry + 2*ATR (2R), TP2 = Entry + 4*ATR (4R)
         tp1_price = entry_price + (atr * TP1_MULTIPLIER)
@@ -133,25 +153,30 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         reward = abs(tp1_price - entry_price)  # = 2*ATR
         rr_ratio = reward / risk if risk > 0 else 0  # = 2.0
         
-        # R:R kontrolü
-        if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"{coin} FVG LONG rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
+        # v2.2.6 FIX: R:R kontrolü - floating point toleransı
+        if round(rr_ratio, 2) < MIN_RR_RATIO:
+            logger.info(f"{coin} FVG LONG [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
+        # v2.2.7: Dinamik confidence hesapla
+        fvg_strength = fvg.get('strength', 'medium')
+        strength_score = calculate_setup_strength(vol_ratio, fvg_strength, rr_ratio, 'MEDIUM')
+        confidence = _get_confidence_label(strength_score)
+        
+        # v2.3.8: Volume format .4f
         detailed_explanation = f"""
 📊 **FVG Analizi (LONG):**
 • Gap: {format_price(gap_low)} - {format_price(gap_high)}
-• TF: {timeframe.upper()} | Vol: {vol_ratio:.2f}x
+• TF: {timeframe.upper()} | Vol: {vol_ratio:.4f}x | Score: {strength_score:.2f}
 
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
-• Stop: {format_price(stop_price)}
+• Stop: {stop_loss}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f}
+• R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
-        logger.info(f"✅ {coin} FVG LONG VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
+        logger.info(f"✅ {coin} FVG LONG [{timeframe}] VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.4f}x, Conf={confidence}")
         
         return {
             'type': 'FVG + Volume (LONG)',
@@ -162,7 +187,8 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'rr_ratio': rr_ratio,
-            'confidence': 'MEDIUM',
+            'confidence': confidence,
+            'strength_score': strength_score,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
             'tp1': format_price(tp1_price),
             'tp2': format_price(tp2_price),
@@ -175,31 +201,32 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
 
 
 def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
-    """Bearish FVG setup validasyonu"""
+    """Bearish FVG setup onayı"""
     try:
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
         
-        # Volume kontrolü (threshold: 0.5x)
-        if not volume.get('spike', False) and vol_ratio < VOLUME_THRESHOLD:
-            logger.info(f"{coin} FVG SHORT rejected: Low Volume ({vol_ratio:.2f}x < {VOLUME_THRESHOLD}x)")
+        # v2.3.8: Volume kontrolü - VOLUME_TRADEABLE_MIN calculators'tan (DRY)
+        if not volume.get('spike', False) and vol_ratio < VOLUME_TRADEABLE_MIN:
+            logger.info(f"{coin} FVG SHORT [{timeframe}] rejected: Low Volume ({vol_ratio:.4f}x < {VOLUME_TRADEABLE_MIN}x)")
             return None
         
-        gap_high = fvg['gap_high']
-        gap_low = fvg['gap_low']
+        gap_low = fvg['low']
+        gap_high = fvg['high']
         
-        # Entry = gap_low + (((gap_high + gap_low) / 100) * 21.46)
-        entry_price = gap_low + (((gap_high + gap_low) / 100) * FVG_ENTRY_RATIO)
+        # Entry = Gap mid-point
+        entry_price = (gap_low + gap_high) / 2
         
         # v2.2.5: Entry distance kontrolü
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
-                logger.info(f"{coin} FVG SHORT rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
+                logger.info(f"{coin} FVG SHORT [{timeframe}] rejected: Entry too far ({distance_percent:.1f}% > {MAX_ENTRY_DISTANCE_PERCENT}%)")
                 return None
         
         # Stop = Entry + ATR (1R risk)
         stop_price = entry_price + atr
+        stop_loss = format_price(stop_price)
         
         # TP1 = Entry - 2*ATR (2R), TP2 = Entry - 4*ATR (4R)
         tp1_price = entry_price - (atr * TP1_MULTIPLIER)
@@ -210,25 +237,30 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         reward = abs(entry_price - tp1_price)  # = 2*ATR
         rr_ratio = reward / risk if risk > 0 else 0  # = 2.0
         
-        # R:R kontrolü
-        if rr_ratio < MIN_RR_RATIO:
-            logger.info(f"{coin} FVG SHORT rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
+        # v2.2.6 FIX: R:R kontrolü - floating point toleransı
+        if round(rr_ratio, 2) < MIN_RR_RATIO:
+            logger.info(f"{coin} FVG SHORT [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.1.3: Simplified - risk hesabi okx_service'te yapiliyor
+        # v2.2.7: Dinamik confidence hesapla
+        fvg_strength = fvg.get('strength', 'medium')
+        strength_score = calculate_setup_strength(vol_ratio, fvg_strength, rr_ratio, 'MEDIUM')
+        confidence = _get_confidence_label(strength_score)
+        
+        # v2.3.8: Volume format .4f
         detailed_explanation = f"""
 📊 **FVG Analizi (SHORT):**
 • Gap: {format_price(gap_low)} - {format_price(gap_high)}
-• TF: {timeframe.upper()} | Vol: {vol_ratio:.2f}x
+• TF: {timeframe.upper()} | Vol: {vol_ratio:.4f}x | Score: {strength_score:.2f}
 
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
-• Stop: {format_price(stop_price)}
+• Stop: {stop_loss}
 • TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
-• R:R: {rr_ratio:.2f}
+• R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
-        logger.info(f"✅ {coin} FVG SHORT VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.2f}x")
+        logger.info(f"✅ {coin} FVG SHORT [{timeframe}] VALID: R:R={rr_ratio:.2f}, Vol={vol_ratio:.4f}x, Conf={confidence}")
         
         return {
             'type': 'FVG + Volume (SHORT)',
@@ -239,7 +271,8 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
             'tp1_price': tp1_price,
             'tp2_price': tp2_price,
             'rr_ratio': rr_ratio,
-            'confidence': 'MEDIUM',
+            'confidence': confidence,
+            'strength_score': strength_score,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
             'tp1': format_price(tp1_price),
             'tp2': format_price(tp2_price),

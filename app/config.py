@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.2.8
+T-TARS Configuration v2.3.8
 ===========================
+
+v2.3.8:
+- NEW: MARKET_CACHE_TTL = 1200 (20 dakika) - HTF verileri için
+- CHANGED: STOP_DISTANCE_MAX = 0.025 (%2.5) - Claude prompt ile tutarlı
+
+v2.3.7:
+- CHANGED: MONITOR_INTERVAL_MINUTES = 5 (bar kapanışı timing ile uyum)
 
 v2.2.6:
 - CHANGED: AUTO_SCAN_PAIRS 9 coine düşürüldü (log kirliliği azaltma)
@@ -18,7 +25,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.2.8"""
+    """T-TARS Configuration v2.3.8"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -77,7 +84,7 @@ class Config:
     # TIMEFRAMES (v2.2.2)
     # ============================================
     # 2h kaldırıldı - CCXT Bitget bug (GitHub #27281)
-    TIMEFRAMES = ['4h', '1h', '30m', '15m', '5m']
+    TIMEFRAMES = ['1h', '30m', '15m', '5m']
     
     # ============================================
     # TRADING PAIRS (v2.2.8 - Sadece 7 coin)
@@ -106,13 +113,13 @@ class Config:
     ]
     
     # ============================================
-    # RISK MANAGEMENT (v2.1.4)
+    # RISK MANAGEMENT (v2.3.8)
     # ============================================
     RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # %1 risk (default)
     
-    # Stop mesafesi limitleri
+    # Stop mesafesi limitleri (v2.3.8: MAX %1.5 → %2.5)
     STOP_DISTANCE_MIN = float(os.getenv('STOP_DISTANCE_MIN', '0.008'))  # %0.8 minimum
-    STOP_DISTANCE_MAX = float(os.getenv('STOP_DISTANCE_MAX', '0.015'))  # %1.5 maksimum
+    STOP_DISTANCE_MAX = float(os.getenv('STOP_DISTANCE_MAX', '0.025'))  # %2.5 maksimum
     
     # Dinamik marjin limitleri
     MARGIN_MIN_PERCENT = float(os.getenv('MARGIN_MIN_PERCENT', '1.0'))  # %1
@@ -123,9 +130,15 @@ class Config:
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
     
     # ============================================
-    # MONITORING & SERVER
+    # CACHE & MONITORING (v2.3.8)
     # ============================================
-    MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '3'))
+    # Market cache TTL - TradingView webhook verilerinin geçerlilik süresi
+    # HTF (15m, 30m, 1h) verileri 15 dakikada bir geliyor → 20 dakika TTL yeterli
+    MARKET_CACHE_TTL = int(os.getenv('MARKET_CACHE_TTL', '1200'))  # 20 dakika (saniye)
+    
+    # Bar kapanışı timing: 5m barlar xx:00, xx:05... kapanır
+    # Analyze xx:01, xx:06... çalışır (webhook geldikten sonra)
+    MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))
     PORT = int(os.getenv('PORT', '8080'))
     
     # ============================================

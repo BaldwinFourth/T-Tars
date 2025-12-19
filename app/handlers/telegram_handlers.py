@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.2.6
+T-TARS Telegram Handlers v2.3.1
 ================================
 Telegram bot komut handler'ları.
 
-v2.2.6:
-- FIX: Execute sonrası HER ZAMAN Telegram bildirimi gönderiliyor
-- NEW: chat_id olmasa bile Config.TELEGRAM_CHAT_ID'ye gönderim
+v2.3.1:
+- FIX: /score bakiye - Available yerine TOTAL bakiye gösteriliyor
+- FIX: Best/Worst gösterimi - min trade yoksa da göster
+- ADD: Debug bilgileri eklendi
 
-v2.2.1:
-- FIX: Telegram Markdown ** → * (Telegram uyumluluğu)
-- CHANGED: /help artık CHANGELOG gösteriyor
+v2.3.0:
+- REMOVED: execute_trade_for_setup() → bitget_service.py'ye taşındı
+- Telegram bildirimleri main.py'de yapılıyor
 """
 
 import logging
-import json
 import threading
 from datetime import datetime, timezone, timedelta
 from app.config import Config
@@ -23,19 +23,29 @@ from app.strategies.setup_detector import detect_all_trading_setups
 logger = logging.getLogger(__name__)
 TURKEY_TZ = timezone(timedelta(hours=3))
 
+
 def get_turkey_time():
     return datetime.now(TURKEY_TZ)
 
+
 def format_price(price):
-    if price is None or price == 0: return "$0.00"
+    if price is None or price == 0:
+        return "$0.00"
     try:
         abs_price = abs(float(price))
-        if abs_price < 0.0001: return f"${price:.8f}"
-        elif abs_price < 0.01: return f"${price:.6f}"
-        elif abs_price < 1: return f"${price:.4f}"
-        elif abs_price < 100: return f"${price:.4f}"
-        else: return f"${price:,.2f}"
-    except: return "$0.00"
+        if abs_price < 0.0001:
+            return f"${price:.8f}"
+        elif abs_price < 0.01:
+            return f"${price:.6f}"
+        elif abs_price < 1:
+            return f"${price:.4f}"
+        elif abs_price < 100:
+            return f"${price:.4f}"
+        else:
+            return f"${price:,.2f}"
+    except:
+        return "$0.00"
+
 
 # --------------------------
 # GLOBAL DEĞİŞKENLER
@@ -45,7 +55,8 @@ _exchange = None
 _claude = None
 _storage = None
 _tracking = None
-_trading_enabled = True 
+_trading_enabled = True
+
 
 def init_handlers(telegram, exchange, claude, storage, tracking):
     global _telegram, _exchange, _claude, _storage, _tracking, _trading_enabled
@@ -55,7 +66,8 @@ def init_handlers(telegram, exchange, claude, storage, tracking):
     _storage = storage
     _tracking = tracking
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.2.6) - Trading: {_trading_enabled}")
+    logger.info(f"✅ Telegram handlers initialized (v2.3.1) - Trading: {_trading_enabled}")
+
 
 # --------------------------
 # BEST TF SEÇİCİ
@@ -82,6 +94,7 @@ def select_best_timeframe_for_plan(setups):
             best_setup = setup
             
     return best_setup
+
 
 # --------------------------
 # AI & ANALİZ KOMUTLARI
@@ -195,7 +208,6 @@ def handle_plan_command(text, chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 """
             else:
-                # Setup bulunamadı - genel bakış
                 plan_msg = f"""
 ━━━━━━━━━━━━━━━━━━━━━━
 ℹ️ *T-TARS GENEL BAKIŞ*
@@ -239,6 +251,7 @@ veya Fibo 61.8% tepkisi bekleyin.
 
     threading.Thread(target=run_plan).start()
 
+
 def handle_execute_command(text, chat_id):
     def run_execute():
         try:
@@ -255,6 +268,7 @@ def handle_execute_command(text, chat_id):
     _telegram.send("⚡ *Durum Kontrol Ediliyor...*", chat_id=chat_id)
     threading.Thread(target=run_execute).start()
 
+
 def handle_log_command(text, chat_id):
     def run_log():
         try:
@@ -268,6 +282,7 @@ def handle_log_command(text, chat_id):
 
     _telegram.send("📋 *Log Hazırlanıyor...*", chat_id=chat_id)
     threading.Thread(target=run_log).start()
+
 
 # --------------------------
 # TARAMA & İSTATİSTİK KOMUTLARI
@@ -305,7 +320,8 @@ def handle_scan_command(chat_id):
                                         'risk_percent': 2.0
                                     })
                                     total_new_setups += 1
-                            except: pass
+                            except:
+                                pass
                         
                         results.append(f"✅ {coin_name}: {len(setups)} setup")
                     else:
@@ -327,32 +343,38 @@ def handle_scan_command(chat_id):
     _telegram.send(f"🔍 *Market Taraması Başlatıldı* ({len(Config.AUTO_SCAN_PAIRS)} coin)\n⏳ Analiz biraz zaman alabilir...", chat_id=chat_id)
     threading.Thread(target=run_scan).start()
 
+
 def handle_score_command(chat_id):
-    """
-    /score - Performans raporu
-    """
+    """/score - Performans raporu v2.3.1"""
     def run_score():
         try:
             if not _tracking:
                 _telegram.send("❌ Tracking servisi aktif değil.", chat_id=chat_id)
                 return
 
-            real_balance = None
+            # v2.3.1 FIX: TOTAL bakiye al, Available değil!
+            total_balance = None
+            available_balance = None
             try:
                 bal = _exchange.get_balance()
                 if bal.get('success'):
-                    real_balance = float(bal.get('free', 0))
-                    if real_balance <= 0:
-                        real_balance = None
+                    total_balance = float(bal.get('total', 0))
+                    available_balance = float(bal.get('free', 0))
+                    logger.info(f"📊 Score balance: Total=${total_balance:.2f}, Available=${available_balance:.2f}")
             except Exception as e:
                 logger.warning(f"Balance fetch error: {e}")
             
-            stats = _tracking.get_aggregate_stats(real_balance=real_balance)
+            # v2.3.1: Total bakiye ile stats al
+            stats = _tracking.get_aggregate_stats(real_balance=total_balance)
             
-            display_balance = stats.get('starting_balance', 500.0)
+            # v2.3.1: Total bakiyeyi göster
+            display_balance = total_balance if total_balance and total_balance > 0 else stats.get('starting_balance', 500.0)
             
             profit_emoji = "📈" if stats['profit'] >= 0 else "📉"
             profit_sign = "+" if stats['profit'] >= 0 else ""
+            
+            # Tamamlanan işlem sayısı
+            completed_trades = stats['winning_trades'] + stats['losing_trades']
             
             msg = f"""
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -362,36 +384,65 @@ def handle_score_command(chat_id):
 🎯 *Genel Durum*
 • Total: {stats['total_setups']} | Win: {stats['winning_trades']} | Loss: {stats['losing_trades']}
 • Win Rate: %{stats['win_rate']:.1f} | Loss Rate: %{stats['loss_rate']:.1f}
-• Pending: {stats['pending_setups']} | BE: {stats['breakeven_trades']}
+• Pending: {stats['pending_setups']} | BE: {stats['breakeven_trades']} | Expired: {stats.get('expired_setups', 0)}
+• Completed: {completed_trades}
 
 {profit_emoji} *P/L Durumu*
-• Bakiye: ${display_balance:,.2f}
+• Bakiye (Total): ${display_balance:,.2f}
+• Kullanılabilir: ${available_balance:,.2f if available_balance else 0:.2f}
 • Kar/Zarar: {profit_sign}${stats['profit']:,.2f} ({profit_sign}%{stats['profit_percent']:.1f})
 """
 
-            if stats.get('top_5_coins'):
-                msg += "\n🏆 *Top 5 Coin* (min 3 trade)\n"
-                for i, (coin, data) in enumerate(stats['top_5_coins'], 1):
-                    completed = data.get('completed', data['wins'] + data['losses'])
-                    msg += f"  {i}. {coin} - W:{data['win_rate']}% L:{data['loss_rate']}% ({completed})\n"
+            # v2.3.1: Best/Worst Coin - min trade kontrolü kaldırıldı, tümünü göster
+            coin_breakdown = stats.get('coin_breakdown', {})
+            if coin_breakdown:
+                # En iyi 5 coin (win_rate'e göre sırala)
+                sorted_coins = sorted(
+                    [(c, s) for c, s in coin_breakdown.items() if s['wins'] + s['losses'] > 0],
+                    key=lambda x: x[1]['win_rate'],
+                    reverse=True
+                )
+                
+                if sorted_coins:
+                    msg += "\n🏆 *Best Coins* (by Win Rate)\n"
+                    for i, (coin, data) in enumerate(sorted_coins[:5], 1):
+                        completed = data['wins'] + data['losses']
+                        msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
+                    
+                    # Worst coins (tersten)
+                    worst_coins = sorted_coins[-5:] if len(sorted_coins) > 5 else []
+                    if worst_coins:
+                        msg += "\n💀 *Worst Coins* (by Win Rate)\n"
+                        for i, (coin, data) in enumerate(reversed(worst_coins), 1):
+                            completed = data['wins'] + data['losses']
+                            msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
             
-            if stats.get('top_5_timeframes'):
-                msg += "\n⏱ *Top 5 TimeFrame* (min 3 trade)\n"
-                for i, (tf, data) in enumerate(stats['top_5_timeframes'], 1):
-                    completed = data.get('completed', data['wins'] + data['losses'])
-                    msg += f"  {i}. {tf} - W:{data['win_rate']}% L:{data['loss_rate']}% ({completed})\n"
+            # v2.3.1: Best/Worst TF
+            tf_breakdown = stats.get('timeframe_breakdown', {})
+            if tf_breakdown:
+                sorted_tfs = sorted(
+                    [(tf, s) for tf, s in tf_breakdown.items() if s['wins'] + s['losses'] > 0],
+                    key=lambda x: x[1]['win_rate'],
+                    reverse=True
+                )
+                
+                if sorted_tfs:
+                    msg += "\n⏱ *Best TimeFrames* (by Win Rate)\n"
+                    for i, (tf, data) in enumerate(sorted_tfs[:5], 1):
+                        completed = data['wins'] + data['losses']
+                        msg += f"  {i}. {tf} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
+                    
+                    worst_tfs = sorted_tfs[-5:] if len(sorted_tfs) > 5 else []
+                    if worst_tfs:
+                        msg += "\n⚠️ *Worst TimeFrames* (by Win Rate)\n"
+                        for i, (tf, data) in enumerate(reversed(worst_tfs), 1):
+                            completed = data['wins'] + data['losses']
+                            msg += f"  {i}. {tf} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
             
-            if stats.get('worst_5_coins') and len(stats['worst_5_coins']) > 0:
-                msg += "\n💀 *Worst 5 Coin* (min 3 trade)\n"
-                for i, (coin, data) in enumerate(stats['worst_5_coins'], 1):
-                    completed = data.get('completed', data['wins'] + data['losses'])
-                    msg += f"  {i}. {coin} - W:{data['win_rate']}% L:{data['loss_rate']}% ({completed})\n"
-            
-            if stats.get('worst_5_timeframes') and len(stats['worst_5_timeframes']) > 0:
-                msg += "\n⚠️ *Worst 5 TimeFrame* (min 3 trade)\n"
-                for i, (tf, data) in enumerate(stats['worst_5_timeframes'], 1):
-                    completed = data.get('completed', data['wins'] + data['losses'])
-                    msg += f"  {i}. {tf} - W:{data['win_rate']}% L:{data['loss_rate']}% ({completed})\n"
+            # Eğer hiç completed trade yoksa bilgi ver
+            if completed_trades == 0:
+                msg += "\n⚠️ *Not:* Henüz tamamlanan işlem yok.\n"
+                msg += "Win/Loss oranları işlemler kapandıkça güncellenecek.\n"
             
             msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR"
             
@@ -403,6 +454,7 @@ def handle_score_command(chat_id):
 
     _telegram.send("📊 *İstatistikler Hesaplanıyor...*", chat_id=chat_id)
     threading.Thread(target=run_score).start()
+
 
 def handle_reset_score_command(chat_id):
     def run_reset():
@@ -417,7 +469,10 @@ def handle_reset_score_command(chat_id):
     _telegram.send("🔄 *Sıfırlanıyor...*", chat_id=chat_id)
     threading.Thread(target=run_reset).start()
 
-# --- BORSA KOMUTLARI ---
+
+# --------------------------
+# BORSA KOMUTLARI
+# --------------------------
 
 def handle_status_command(chat_id):
     def run_status():
@@ -425,19 +480,27 @@ def handle_status_command(chat_id):
             import time
             
             check_start = time.time()
-            services_status = {'telegram': '✅', 'bitget_market': '⏳', 'bitget_api': '⏳', 'claude': '⏳', 'storage': '⏳'}
+            services_status = {
+                'telegram': '✅',
+                'bitget_market': '⏳',
+                'bitget_api': '⏳',
+                'claude': '⏳',
+                'storage': '⏳'
+            }
             
             try:
                 price = _exchange.get_current_price('BTC/USDT:USDT')
                 services_status['bitget_market'] = f'✅ (${price:,.0f})' if price > 0 else '❌'
-            except: services_status['bitget_market'] = '❌'
+            except:
+                services_status['bitget_market'] = '❌'
             
             try:
                 if _exchange.authenticated:
                     services_status['bitget_api'] = '✅ (Auth)'
                 else:
                     services_status['bitget_api'] = '⚠️ (No Auth)'
-            except: services_status['bitget_api'] = '❌'
+            except:
+                services_status['bitget_api'] = '❌'
             
             services_status['claude'] = '✅' if Config.ANTHROPIC_API_KEY else '❌'
             services_status['storage'] = '✅'
@@ -460,6 +523,7 @@ def handle_status_command(chat_id):
 📊 *Sistem*
 • Versiyon: v{Config.VERSION}
 • Exchange: Bitget
+• AI Engine: Claude Haiku 4.5
 • Trading: {trading_status}
 • Response: {check_time:.0f}ms
 
@@ -474,10 +538,11 @@ def handle_status_command(chat_id):
 
     threading.Thread(target=run_status).start()
 
+
 def handle_balance_command(chat_id):
     def run_bal():
         try:
-            if not _exchange.authenticated: 
+            if not _exchange.authenticated:
                 return _telegram.send("❌ Bitget API bağlantısı yok", chat_id=chat_id)
             bal = _exchange.get_balance()
             if bal.get('success'):
@@ -493,50 +558,47 @@ def handle_balance_command(chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 """
                 _telegram.send(msg, chat_id=chat_id)
-            else: 
+            else:
                 _telegram.send(f"❌ Hata: {bal.get('error')}", chat_id=chat_id)
-        except Exception as e: 
+        except Exception as e:
             _telegram.send(f"❌ Hata: {e}", chat_id=chat_id)
     
     _telegram.send("💰 *Sorgulanıyor...*", chat_id=chat_id)
     threading.Thread(target=run_bal).start()
 
+
 def handle_positions_command(chat_id):
     def run_pos():
         try:
-            if not _exchange.authenticated: 
+            if not _exchange.authenticated:
                 return _telegram.send("❌ Bitget API bağlantısı yok", chat_id=chat_id)
             pos = _exchange.get_positions()
-            if not pos: 
+            if not pos:
                 return _telegram.send("ℹ️ Açık pozisyon yok", chat_id=chat_id)
             
             msg = f"━━━━━━━━━━━━━━━━━━━━━━\n📊 *POZİSYONLAR* ({len(pos)})\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
             for p in pos:
-                s = '🟢' if str(p['side']).upper()=='LONG' else '🔴'
-                pl = float(p.get('unrealized_pnl',0))
-                symbol = p['symbol'].replace('/USDT:USDT','')
+                s = '🟢' if str(p['side']).upper() == 'LONG' else '🔴'
+                pl = float(p.get('unrealized_pnl', 0))
+                symbol = p['symbol'].replace('/USDT:USDT', '')
                 msg += f"{s} *{symbol}* | P/L: ${pl:+.2f}\n"
             msg += "\n━━━━━━━━━━━━━━━━━━━━━━"
             _telegram.send(msg, chat_id=chat_id)
-        except Exception as e: 
+        except Exception as e:
             _telegram.send(f"❌ Hata: {e}", chat_id=chat_id)
     
     _telegram.send("📊 *Pozisyonlar çekiliyor...*", chat_id=chat_id)
     threading.Thread(target=run_pos).start()
 
+
 def handle_help_command(chat_id):
-    """
-    /help - Yardım ve CHANGELOG
-    v2.2.1: Cloud Storage'dan CHANGELOG çeker
-    """
+    """/help - Yardım ve CHANGELOG"""
     def run_help():
         try:
-            # CHANGELOG'u Cloud Storage'dan çek
             changelog_text = ""
             try:
                 changelog = _storage.get_changelog()
                 if changelog:
-                    # İlk 1500 karakter (Telegram limiti)
                     changelog_text = changelog[:1500]
                     if len(changelog) > 1500:
                         changelog_text += "\n... (devamı için CHANGELOG.md'ye bakın)"
@@ -549,6 +611,7 @@ def handle_help_command(chat_id):
 🤖 *T-TARS v{Config.VERSION}*
 ━━━━━━━━━━━━━━━━━━━━━━
 Bitget Futures Trading Bot
+AI Engine: Claude Haiku 4.5
 
 📋 *KOMUTLAR*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -585,7 +648,10 @@ Bitget Futures Trading Bot
     
     threading.Thread(target=run_help).start()
 
-# --- TRADING KONTROL ---
+
+# --------------------------
+# TRADING KONTROL
+# --------------------------
 
 def handle_stopbitget_command(chat_id):
     global _trading_enabled
@@ -596,14 +662,15 @@ def handle_stopbitget_command(chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 
 • Yeni emir açılmayacak
+• Claude AI değerlendirme duracak
 • Mevcut emirler etkilenmez
-• Bildirimler kapalı
 
 Tekrar başlatmak için:
 /startbitget
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     _telegram.send(msg, chat_id=chat_id)
+
 
 def handle_startbitget_command(chat_id):
     global _trading_enabled
@@ -614,8 +681,8 @@ def handle_startbitget_command(chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 
 • Otomatik trading başladı
-• Setup'lar işleme alınacak
-• Bildirimler açık
+• Claude AI karar verecek
+• Setup'lar değerlendirilecek
 
 Durdurmak için:
 /stopbitget
@@ -623,86 +690,11 @@ Durdurmak için:
 """
     _telegram.send(msg, chat_id=chat_id)
 
-# --- TİCARET MOTORU ---
+
+# --------------------------
+# HELPER FUNCTIONS
+# --------------------------
 
 def is_trading_enabled():
+    """Trading aktif mi?"""
     return _trading_enabled
-
-def execute_trade_for_setup(setup_data, chat_id=None):
-    """
-    v2.2.6: Bitget ile Trade Execution + HER ZAMAN Telegram Bildirimi
-    
-    chat_id olmasa bile Config.TELEGRAM_CHAT_ID'ye gönderir
-    """
-    try:
-        if not _trading_enabled:
-            return {'success': False, 'reason': 'disabled'}
-        
-        pair = setup_data.get('pair', '')
-        direction = setup_data.get('direction', 'LONG')
-        entry = float(setup_data.get('entry_price', 0))
-        stop = float(setup_data.get('stop_price', 0))
-        tp1 = float(setup_data.get('tp1_price', 0))
-        
-        coin_name = pair.replace('/USDT:USDT', '').replace('USDT', '').replace('/', '')
-        
-        res = _exchange.place_order_with_tp_sl(
-            symbol=pair.replace('USDT', '/USDT:USDT') if '/' not in pair else pair,
-            side='buy' if direction == 'LONG' else 'sell',
-            entry_price=entry,
-            stop_price=stop,
-            tp_price=tp1
-        )
-        
-        # v2.2.6: HER ZAMAN bildirim gönder (chat_id yoksa Config'den al)
-        notify_chat = chat_id or Config.TELEGRAM_CHAT_ID
-        
-        if res.get('success'):
-            dir_emoji = "🟢" if direction == "LONG" else "🔴"
-            
-            # v2.2.6: Detaylı başarı bildirimi
-            success_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
-{dir_emoji} *YENİ EMİR AÇILDI*
-━━━━━━━━━━━━━━━━━━━━━━
-
-📊 *{coin_name}* | {direction}
-💵 Entry: {format_price(entry)}
-🛑 SL: {format_price(stop)}
-✅ TP: {format_price(tp1)}
-
-📦 Kontrat: {res.get('contracts', 'N/A')}
-💰 Pozisyon: ${res.get('position_usd', 0):.2f}
-🔖 Order ID: {res.get('order_id', 'N/A')[:16]}...
-
-━━━━━━━━━━━━━━━━━━━━━━
-⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
-"""
-            _telegram.send(success_msg, chat_id=notify_chat)
-            logger.info(f"📱 Telegram bildirimi gönderildi: {coin_name} {direction}")
-            
-            return {
-                'success': True,
-                'order_id': res.get('order_id'),
-                'contracts': res.get('contracts'),
-                'position_usd': res.get('position_usd')
-            }
-        else:
-            # v2.2.6: Hata bildirimi
-            error_msg = f"❌ *EMİR HATASI*\n\n{coin_name} {direction}\nHata: {res.get('error', 'Unknown')}"
-            _telegram.send(error_msg, chat_id=notify_chat)
-            
-            return {'success': False, 'reason': res.get('error')}
-            
-    except Exception as e:
-        logger.error(f"Exec Error: {e}")
-        
-        # v2.2.6: Exception durumunda da bildirim
-        try:
-            notify_chat = chat_id or Config.TELEGRAM_CHAT_ID
-            _telegram.send(f"❌ *Execute Exception*\n\n{str(e)}", chat_id=notify_chat)
-        except:
-            pass
-        
-        return {'success': False, 'reason': str(e)}

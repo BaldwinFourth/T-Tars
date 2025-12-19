@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.0.9
+T-TARS Trading Calculators v2.3.8
 ===================================
+v2.3.8:
+- DRY prensibi: Score'lar constant olarak tanımlandı
+- VOLUME_TRADEABLE_MIN eklendi (volume_analyzer ve claude_service import edecek)
+- DEFAULT_STRENGTH_SCORE ve DEFAULT_CONFIDENCE_SCORE eklendi
+- calculate_setup_strength() artık get_volume_score() ve get_rr_score() çağırıyor
+- Fine tuning için tüm değerler dosya başında
+
 Kullanım:
     from app.strategies.calculators import (
         calculate_setup_strength,
@@ -10,68 +17,97 @@ Kullanım:
         MIN_RR_RATIO,
         STOP_MULTIPLIER,
         TP1_MULTIPLIER,
-        TP2_MULTIPLIER
+        TP2_MULTIPLIER,
+        VOLUME_TRADEABLE_MIN,
+        VOLUME_LOW,
+        VOLUME_GOOD,
+        VOLUME_EXCELLENT
     )
 """
 
 # ============================================
 # ATR MULTIPLIERS - STOP & TP (FINE TUNING)
 # ============================================
-# Stop seviyesi: 1.0 ATR (Daha dar stop)
-STOP_MULTIPLIER = 1.0      
-
-# Hedefler: R:R 2.0 tutturmak için TP1 en az 2.0 ATR olmalı
-# 2.0 / 1.0 = 2.0 R:R
-TP1_MULTIPLIER = 2.0       
-
-# TP2: Ana hedef
-TP2_MULTIPLIER = 4.0       
+STOP_MULTIPLIER = 1.0      # Stop seviyesi: 1.0 ATR
+TP1_MULTIPLIER = 2.0       # TP1: 2.0 ATR (R:R 2.0)
+TP2_MULTIPLIER = 4.0       # TP2: 4.0 ATR (Ana hedef)
 
 # ============================================
-# R:R THRESHOLDS
+# R:R THRESHOLDS (Fine tuning buradan)
 # ============================================
-# Minimum Risk:Reward oranı (Reward / Risk)
-# Kesin kural: En az 2 birim kazanç hedeflenmeli
-MIN_RR_RATIO = 2.0         
-
-RR_EXCELLENT = 4.0         # R:R >= 3.0 → Score 1.0
-RR_GOOD = 3.5              # R:R >= 2.5 → Score 0.8
-RR_MEDIUM = 3            # R:R >= 2.2 → Score 0.6
-RR_MINIMUM = 2.0           # R:R >= 2.0 → Score 0.4
+MIN_RR_RATIO = 2.0         # Minimum kabul edilebilir R:R
+RR_EXCELLENT = 4.0         # Mükemmel
+RR_GOOD = 3.5              # İyi
+RR_MEDIUM = 3.0            # Orta
+RR_MINIMUM = 2.0           # Minimum
 
 # ============================================
-# VOLUME THRESHOLDS
+# R:R SCORES (Fine tuning buradan)
 # ============================================
-VOLUME_EXCELLENT = 3.0     # Volume >= 3.0x → Score 1.0
-VOLUME_GOOD = 2.5          # Volume >= 2.5x → Score 0.8
-VOLUME_MEDIUM = 2.0        # Volume >= 2.0x → Score 0.6
-VOLUME_LOW = 1.5           # Volume >= 1.5x → Score 0.4
+SCORE_RR_EXCELLENT = 1.05  # Bonus
+SCORE_RR_GOOD = 0.85
+SCORE_RR_MEDIUM = 0.65
+SCORE_RR_MINIMUM = 0.35
+SCORE_RR_ELSE = 0.20
 
 # ============================================
-# OB/FVG STRENGTH MAPPING
+# VOLUME THRESHOLDS (Fine tuning buradan)
+# ============================================
+VOLUME_TRADEABLE_MIN = 0.5 # Minimum tradeable (bu altı = reject)
+VOLUME_LOW = 0.8           # Düşük ama kabul edilebilir
+VOLUME_MEDIUM = 1.2        # Orta
+VOLUME_GOOD = 1.6          # İyi
+VOLUME_EXCELLENT = 2.0     # Mükemmel volume spike
+
+# Volume Spike Flag (boolean için) - bitget_service kullanıyor
+VOLUME_SPIKE_FLAG = 1.5    # spike_ratio >= bu değer → spike=True
+
+# Volume Strength Labels - bitget_service kullanıyor
+VOLUME_STRENGTH_HIGH = 3.0   # >= 3.0 → 'high'
+VOLUME_STRENGTH_MEDIUM = 2.0 # >= 2.0 → 'medium'
+# else → 'low'
+
+# ============================================
+# VOLUME SCORES (Fine tuning buradan)
+# ============================================
+SCORE_VOLUME_EXCELLENT = 1.20  # Bonus
+SCORE_VOLUME_GOOD = 0.90
+SCORE_VOLUME_MEDIUM = 0.70
+SCORE_VOLUME_LOW = 0.40
+SCORE_VOLUME_ELSE = 0.25
+
+# ============================================
+# OB/FVG STRENGTH MAPPING (Fine tuning buradan)
 # ============================================
 STRENGTH_MAP = {
-    'high': 1.05,
-    'medium': 0.65,
-    'low': 0.25
+    'high': 1.15,    # Bonus
+    'medium': 0.75,
+    'low': 0.35
 }
 
 # ============================================
-# CONFIDENCE MAPPING
+# CONFIDENCE MAPPING (Fine tuning buradan)
 # ============================================
 CONFIDENCE_MAP = {
-    'HIGH': 1.05,
+    'HIGH': 1.15,    # Bonus
     'MEDIUM': 0.65,
     'LOW': 0.25
 }
 
 # ============================================
-# WEIGHT DISTRIBUTION
+# FALLBACK DEFAULTS (Bilinmeyen değer gelirse)
 # ============================================
-WEIGHT_VOLUME = 0.25
-WEIGHT_STRENGTH = 0.25
-WEIGHT_RR = 0.25
-WEIGHT_CONFIDENCE = 0.25
+DEFAULT_STRENGTH_SCORE = 0.25   # Bilinmeyen strength için
+DEFAULT_CONFIDENCE_SCORE = 0.25 # Bilinmeyen confidence için
+
+# ============================================
+# WEIGHT DISTRIBUTION (Fine tuning buradan)
+# ============================================
+WEIGHT_VOLUME = 0.25       # Volume ağırlığı
+WEIGHT_STRENGTH = 0.25     # OB/FVG gücü ağırlığı
+WEIGHT_RR = 0.25           # Risk:Reward ağırlığı
+WEIGHT_CONFIDENCE = 0.25   # Güven ağırlığı
+# Toplam = 1.0
 
 
 # ============================================
@@ -122,39 +158,58 @@ def calculate_rr(entry_price, stop_price, tp_price):
     return reward / risk
 
 
+def get_volume_score(volume_ratio):
+    """
+    Volume spike oranına göre score döndür.
+    Fine tuning: Dosya başındaki SCORE_VOLUME_* constant'larını değiştir.
+    """
+    if volume_ratio >= VOLUME_EXCELLENT:
+        return SCORE_VOLUME_EXCELLENT
+    elif volume_ratio >= VOLUME_GOOD:
+        return SCORE_VOLUME_GOOD
+    elif volume_ratio >= VOLUME_MEDIUM:
+        return SCORE_VOLUME_MEDIUM
+    elif volume_ratio >= VOLUME_LOW:
+        return SCORE_VOLUME_LOW
+    else:
+        return SCORE_VOLUME_ELSE
+
+
+def get_rr_score(rr_ratio):
+    """
+    Risk:Reward oranına göre score döndür.
+    Fine tuning: Dosya başındaki SCORE_RR_* constant'larını değiştir.
+    """
+    if rr_ratio >= RR_EXCELLENT:
+        return SCORE_RR_EXCELLENT
+    elif rr_ratio >= RR_GOOD:
+        return SCORE_RR_GOOD
+    elif rr_ratio >= RR_MEDIUM:
+        return SCORE_RR_MEDIUM
+    elif rr_ratio >= RR_MINIMUM:
+        return SCORE_RR_MINIMUM
+    else:
+        return SCORE_RR_ELSE
+
+
 def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio, confidence):
     """
-    Setup gücünü hesapla (0-1 arası).
+    Setup gücünü hesapla (0-1 arası, bonus ile 1.0'ı aşabilir).
+    
+    v2.3.8: DRY - get_volume_score() ve get_rr_score() çağrılıyor.
+    Fine tuning: Dosya başındaki constant'ları değiştir.
     """
-    # Volume Score
-    if volume_spike_ratio >= VOLUME_EXCELLENT:
-        volume_score = 1.05
-    elif volume_spike_ratio >= VOLUME_GOOD:
-        volume_score = 0.85
-    elif volume_spike_ratio >= VOLUME_MEDIUM:
-        volume_score = 0.65
-    elif volume_spike_ratio >= VOLUME_LOW:
-        volume_score = 0.35
-    else:
-        volume_score = 0.2
+    # Volume Score (DRY - fonksiyon çağır)
+    volume_score = get_volume_score(volume_spike_ratio)
     
     # OB/FVG Strength Score
-    strength_score = STRENGTH_MAP.get(ob_or_fvg_strength.lower(), 0.5)
+    strength_score = STRENGTH_MAP.get(ob_or_fvg_strength.lower(), DEFAULT_STRENGTH_SCORE)
     
-    # R:R Score
-    if rr_ratio >= RR_EXCELLENT:
-        rr_score = 1.05
-    elif rr_ratio >= RR_GOOD:
-        rr_score = 0.85
-    elif rr_ratio >= RR_MEDIUM:
-        rr_score = 0.65
-    elif rr_ratio >= RR_MINIMUM:
-        rr_score = 0.35
-    else:
-        rr_score = 0.2
+    # R:R Score (DRY - fonksiyon çağır)
+    rr_score = get_rr_score(rr_ratio)
     
     # Confidence Score
-    confidence_score = CONFIDENCE_MAP.get(confidence, 0.55)
+    confidence_score = CONFIDENCE_MAP.get(confidence, DEFAULT_CONFIDENCE_SCORE)
     
     # Weighted Average
     overall_strength = (
@@ -167,21 +222,8 @@ def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio, c
     return overall_strength
 
 
-def get_volume_score(volume_ratio):
-    if volume_ratio >= VOLUME_EXCELLENT: return 1.05
-    elif volume_ratio >= VOLUME_GOOD: return 0.85
-    elif volume_ratio >= VOLUME_MEDIUM: return 0.65
-    elif volume_ratio >= VOLUME_LOW: return 0.35
-    else: return 0.2
-
-
-def get_rr_score(rr_ratio):
-    if rr_ratio >= RR_EXCELLENT: return 1.05
-    elif rr_ratio >= RR_GOOD: return 0.85
-    elif rr_ratio >= RR_MEDIUM: return 0.65
-    elif rr_ratio >= RR_MINIMUM: return 0.35
-    else: return 0.2
-
-
 def is_valid_setup(rr_ratio):
+    """
+    R:R minimum gerekliliği karşılıyor mu?
+    """
     return rr_ratio >= MIN_RR_RATIO

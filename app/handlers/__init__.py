@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Handlers Package v2.2.1
+T-TARS Handlers Package v2.3.0
+==============================
+v2.3.0: execute_trade_for_setup kaldırıldı (bitget_service.py'ye taşındı)
 """
 
 from .telegram_handlers import (
@@ -18,8 +20,7 @@ from .telegram_handlers import (
     handle_positions_command,
     handle_stopbitget_command,
     handle_startbitget_command,
-    is_trading_enabled,
-    execute_trade_for_setup
+    is_trading_enabled
 )
 
 __all__ = [
@@ -37,6 +38,5 @@ __all__ = [
     'handle_positions_command',
     'handle_stopbitget_command',
     'handle_startbitget_command',
-    'is_trading_enabled',
-    'execute_trade_for_setup'
+    'is_trading_enabled'
 ]

@@ -1,3 +1,269 @@
+# T-TARS Trading Bot - Changelog
+
+## v2.3.8 (2024-12-19)
+
+### 🔧 DRY Refactoring - Tek Yerden Yönetim
+- **calculators.py**: Tüm threshold'lar ve score'lar merkezi olarak tanımlandı
+- `VOLUME_TRADEABLE_MIN = 0.5` eklendi (minimum tradeable volume)
+- `DEFAULT_STRENGTH_SCORE` ve `DEFAULT_CONFIDENCE_SCORE` eklendi (fallback değerler)
+- `get_volume_score()` ve `get_rr_score()` fonksiyonları `calculate_setup_strength()` tarafından çağrılıyor
+
+### 🔄 Import Güncellemeleri
+- **volume_analyzer.py**: `TRADEABLE_THRESHOLD` kaldırıldı → `VOLUME_TRADEABLE_MIN` import
+- **claude_service.py**: Prompt'taki hardcoded değerler → `VOLUME_LOW`, `VOLUME_GOOD`, `VOLUME_EXCELLENT`, `MIN_RR_RATIO` import
+- **ob_detector.py**: `VOLUME_THRESHOLD` kaldırıldı → `VOLUME_TRADEABLE_MIN` import
+- **fvg_detector.py**: `VOLUME_THRESHOLD` kaldırıldı → `VOLUME_TRADEABLE_MIN` import
+
+### 🐛 Bug Fixes
+- **main.py**: `MARKET_CACHE_TTL` 300→1200 saniye (20 dakika)
+  - HTF verileri (15m, 30m, 1h) artık expire olmadan yeni veri gelir
+  - "Low Volume (0.00x)" false rejection sorunu çözüldü
+
+### 📊 Log Format İyileştirmeleri
+- Volume log format `.2f` → `.4f` (0.0000x hassasiyeti)
+- HTF cache durumu loglarına TTL bilgisi eklendi
+
+### ⚙️ Config Değişiklikleri
+- **config.py**: `MARKET_CACHE_TTL = 1200` eklendi (20 dakika)
+- **config.py**: `STOP_DISTANCE_MAX` %1.5 → %2.5 (Claude prompt ile tutarlı)
+
+### 📁 Değişen Dosyalar
+- `config.py` - MARKET_CACHE_TTL, STOP_DISTANCE_MAX
+- `calculators.py` - Merkezi threshold/score yönetimi + VOLUME_SPIKE_FLAG, VOLUME_STRENGTH_*
+- `volume_analyzer.py` - DRY import
+- `claude_service.py` - DRY import + prompt güncelleme
+- `ob_detector.py` - DRY import + log format
+- `fvg_detector.py` - DRY import + log format
+- `main.py` - Config.MARKET_CACHE_TTL kullanımı
+- `bitget_service.py` - Config.MARKET_CACHE_TTL + DRY volume thresholds
+
+---
+
+## v2.3.7 (2025-12-18)
+
+### Yeni Özellikler
+- **Volume Analyzer Entegrasyonu**: Webhook'tan gelen volume verisi artık `volume_analyzer` modülüne yazılıyor
+- `store_volume()`: Webhook'tan volume/ATR saklar
+- `get_volume()`: Detector'lar için volume döndürür
+- `get_all_volumes()`: Tüm TF'ler için volume döndürür
+- 2 saat sonra otomatik expire
+- **Bar Kapanışı Timing**: Analyze sadece 5m bar kapandıktan 1 dk sonra çalışır (xx:01, xx:06, xx:11...)
+
+### Değişiklikler
+- Webhook hem `MARKET_CACHE` hem `volume_analyzer`'a yazıyor (backward compatibility)
+- `/volume` komutu artık volume store istatistiklerini de gösteriyor
+- Auto analyze'da `cleanup_expired_volumes()` çağrılıyor
+- Cloud Scheduler her 3 dk çağırır ama sadece uygun dakikalarda gerçek analiz yapar
+
+### ATR Format Düzeltmesi
+- **PineScript**: ATR formatı `#.######` (6 decimal) olarak güncellendi
+- **Python**: ATR log formatı `.6g` (dinamik precision, trailing zeros yok)
+- **Örnek Çıktı**: `JUPUSDT_5m = 0.53x, ATR=0.0005` ✅
+
+### Timing Kontrolü (Config'e Bağlı)
+- `Config.MONITOR_INTERVAL_MINUTES = 5` (default)
+- main.py artık Config'den okur (hardcoded değil)
+- Cloud Scheduler: `1,6,11,16,21,26,31,36,41,46,51,56 * * * *`
+
+### Mimari
+- Detector'lar artık `volume_analyzer.get_volume()` ile okuyabilir
+- Cache problemi çözüldü - merkezi volume storage
+- Timing uyumsuzluğu çözüldü - bar kapanışı + 1dk bekleme
+
+---
+
+## v2.3.6 (2025-12-17)
+
+### 🐛 Bug Fixes
+- **FIX: POST 400 hatası düzeltildi** - `spike=0` artık kabul ediliyor
+  - Eski: `spike <= 0` ise 400 dönüyordu (düşük volume'u reddediyordu)
+  - Yeni: Sadece `spike` field eksikse 400 döner, 0 değeri kabul edilir
+  - Bu düzeltme sayesinde tüm volume değerleri cache'e yazılacak
+
+### 📝 Technical Details
+- `/webhook/volume` endpoint'inde validation mantığı değişti
+- `spike=0` = düşük volume demek, bu geçerli bir piyasa verisi
+- Cache miss sorunu çözülecek (0.00x görünmeyecek)
+
+--- 
+
+## v2.3.5 (2025-12-17)
+
+### 🔥 Major Change: Fallback Kaldırıldı
+- **REMOVED:** Bitget fallback volume/ATR hesaplama tamamen kaldırıldı
+- **CHANGED:** Cache'de TradingView verisi yoksa `spike_ratio = 0` döner
+- **RESULT:** Setup'lar "Low Volume (0.00x < 0.5x)" ile reject edilir
+- **BENEFIT:** Daha temiz ve öngörülebilir davranış
+
+### 📊 Davranış Değişikliği
+- Önceki: Cache miss → Bitget'ten hesapla (yavaş, tutarsız)
+- Yeni: Cache miss → spike_ratio=0 → Setup reject
+
+### ⚠️ Önemli Not
+- TradingView alert'lerinin düzgün çalışması kritik
+- XAU ve BGB için TradingView alert yoksa setup bulunamaz
+- Alert webhook URL: `/webhook/volume`
+# T-TARS CHANGELOG
+
+## v2.3.4 (2025-12-17)
+
+## 🚀 Yeni Özellikler
+
+### TradingView ATR Entegrasyonu
+- **ATR artık TradingView'dan alınıyor** (Binance kaynaklı)
+- Pine Script v4 ile hem Volume hem ATR webhook'la gönderiliyor
+- ATR cache'de yoksa veya eskiyse → Bitget fallback hesaplama
+
+### Cache Sistemi Genişletildi
+- `VOLUME_CACHE` → `MARKET_CACHE` olarak yeniden adlandırıldı
+- Cache artık hem Volume hem ATR içeriyor
+- Format: `{"BTCUSDT_15m": {"spike": 2.34, "atr": 125.5, "ts": ...}}`
+
+## 🐛 Bug Fixes
+
+### Claude Service TP2 Fix
+- **FIX:** `adjust_stop_and_tp()` artık TP2'yi de hesaplıyor
+- **FIX:** ATR=0 durumu için sanity check eklendi
+- **FIX:** LONG için TP2 > Entry, SHORT için TP2 < Entry kontrolü
+- Eski problem: TP1 güncelleniyor ama TP2 orijinal kalıyordu
+
+## 📝 Değişiklikler
+
+### main.py
+- `/webhook/volume` endpoint artık `atr` parametresi de kabul ediyor
+- `MARKET_CACHE` hem volume hem ATR depoluyor
+- `/volume` komutu ATR cache durumunu da gösteriyor
+
+### bitget_service.py
+- `volume_cache` → `market_cache` parametresi
+- ATR değeri önce cache'den aranıyor
+- Log: "Vol: X TV, Y fallback | ATR: X TV, Y fallback"
+
+### claude_service.py
+- `adjust_stop_and_tp()` artık `tp2_price` parametresi alıyor
+- TP2 de adjustment'a dahil (TP2/TP1 oranı korunuyor)
+- ATR=0 kontrolü: TP2 ≤ Entry (LONG) veya TP2 ≥ Entry (SHORT) → SKIP
+
+## 📦 Dosyalar
+
+| Dosya | Değişiklik |
+|-------|------------|
+| `main.py` | ATR webhook, MARKET_CACHE |
+| `bitget_service.py` | ATR cache okuma |
+| `claude_service.py` | TP2 adjustment, ATR=0 kontrolü |
+| `VERSION` | 2.3.4 |
+
+---
+
+## v2.3.3 (2025-12-17)
+
+### Added
+- **main.py**: TradingView Volume Webhook entegrasyonu
+  * `VOLUME_CACHE` global dict - TF bazlı volume cache
+  * `/webhook/volume` endpoint - Binance volume spike alır
+  * `/webhook/volume/status` endpoint - Cache durumu gösterir
+  * `/volume` Telegram komutu - Cache stats
+- **bitget_service.py**: `get_complete_analysis_data(volume_cache=None)` parametresi
+  * TradingView cache varsa ve taze (<5dk) → Binance volume kullanır
+  * Cache yoksa veya eskiyse → Bitget fallback hesaplama
+
+### Changed
+- **main.py**: auto_analyze() volume_cache'i bitget'e geçirir
+- **main.py**: Eski cache entry'leri otomatik temizlenir (TTL: 5dk)
+- **bitget_service.py**: Volume source loglama eklendi (Binance vs fallback)
+- **bitget_service.py**: analyze_volume_for_tf() 'source' field eklendi
+
+### Technical Details
+- TradingView Pine Script → POST /webhook/volume → VOLUME_CACHE
+- Cache key format: "BTCUSDT_15m"
+- Payload: {"pair": "BTCUSDT", "tf": "15", "spike": 2.34}
+- Volume öncelik: TradingView Binance > Bitget fallback
+- Auto-cleanup: 5 dakikadan eski entry'ler analyze başında silinir
+
+---
+
+## v2.3.2 (2025-12-17)
+
+### Added
+- **claude_service.py**: Otomatik Stop Adjustment sistemi
+  * Stop < 0.8% → %0.8'e çek, TP orantılı uzat (EXPAND)
+  * Stop 1.5-2% → %1.5'e çek, TP orantılı kısalt (SHRINK)
+  * Stop 2-2.5% → %1.8'e çek, TP 3R yap (AGGRESSIVE)
+  * Stop >= 2.5% → SKIP (çok riskli)
+- **claude_service.py**: `adjust_stop_and_tp()` fonksiyonu
+- **claude_service.py**: Adjustment bilgisi Claude prompt'una eklendi
+- **claude_service.py**: Adjustment logları ve debug bilgisi
+
+### Changed
+- **claude_service.py**: Sabit %0.8 min ve %1.5 max stop kontrolleri kaldırıldı
+- **claude_service.py**: Stop/TP adjustment sonrası Claude'a gönderiliyor
+- **claude_service.py**: Response'a `adjustments` dict eklendi
+
+### Technical Details
+- Stop adjustment sabitleri class değişkeni olarak tanımlandı
+- EXPAND: R:R korunur, stop/tp orantılı genişler
+- SHRINK: R:R korunur, stop/tp orantılı daralır
+- AGGRESSIVE: Stop %1.8, TP 3R sabit
+- Adjustment result None ise → SKIP (stop >= 2.5%)
+
+---
+## v2.3.1 (2025-12-17)
+
+### Fixed
+- **main.py**: `setup['pair'] = pair` eklendi - Setup'a pair bilgisi eklenmiyordu, Claude hep SKIP ediyordu
+- **claude_service.py**: `round(rr_ratio, 2) < 2.0` - R:R 2.00 floating point hatası düzeltildi, artık 2.0 dahil
+- **claude_service.py**: Hardcoded default değerler kaldırıldı - "neyse o" modeli: veri yoksa LOG + SKIP
+- **telegram_handlers.py**: `/score` komutu - Available yerine TOTAL bakiye gösteriliyor
+- **telegram_handlers.py**: Best/Worst coin ve TF - Min 3 trade zorunluluğu kaldırıldı, tüm veriler gösteriliyor
+
+### Added
+- **claude_service.py**: Debug logları - Eksik veri anında görünür
+- **main.py**: Timeframe bilgisi log mesajlarına eklendi
+- **telegram_handlers.py**: Completed trade sayısı, expired count gösterimi
+
+### Technical Details
+- claude_service.py: Tüm kritik veriler (pair, direction, timeframe, entry, stop, tp, rr) kontrol ediliyor
+- Eksik kritik veri varsa → ERROR log + SKIP (yanlış default ile işlem yok)
+- Opsiyonel veriler (confidence, strength_score, pdc, atr, volume) → WARNING log
+
+---
+
+## v2.3.0 (2025-12-16) - Claude AI Decision Engine
+
+### 🚀 Major Features
+- **Claude AI Karar Mekanizması**: Setup'lar artık Claude Haiku 4.5 tarafından değerlendiriliyor
+- **Akıllı Filtre**: Claude onay vermeden HİÇBİR emir açılmıyor
+- **Likidite + Reversal Kontrolü**: PDC sweep ve reversal sinyalleri analiz ediliyor
+
+### 🔄 Changes
+- `claude_service.py`: `evaluate_setup()` fonksiyonu eklendi
+- `bitget_service.py`: `execute_trade_for_setup()` taşındı (telegram_handlers'dan)
+- `main.py`: auto_analyze() Claude entegrasyonu
+- `telegram_handlers.py`: execute_trade_for_setup() kaldırıldı
+
+### 📊 Claude Kontrol Listesi
+1. Likidite temizlenmiş mi? (PDC High/Low sweep)
+2. Reversal sinyali var mı?
+3. OB/FVG confluence güçlü mü?
+4. Direction PDC bias ile uyumlu mu?
+5. Stop mesafesi %0.8-1.5 arası mı?
+6. RR oranı minimum 2.0 mı?
+
+### ⚙️ Technical
+- Pre-filter: RR < 2.0 veya Stop %0.8-1.5 dışı → Otomatik SKIP
+- Claude karar: ENTER / SKIP / WAIT
+- Telegram bildirimi: Claude reasoning dahil
+
+---
+
+## v2.2.9 (2025-12-16) - SL Clamp Fix
+
+### Fixed
+- `place_order_with_tp_sl()` içinde SL minimum mesafe kontrolü
+- Stop çok yakınsa minimum %0.8 mesafeye çekiliyor
+- "Anında stop vurma" sorunu çözüldü
+
+---
 # T-TARS Trading Bot CHANGELOG
 
 ## v2.2.8 (2025-12-16)

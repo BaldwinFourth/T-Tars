@@ -1,3 +1,42 @@
+# T-TARS v2.3.11 - (2025-12-20)
+
+## 🔧 Değişiklikler
+
+### Calculators - Confidence Circular Logic Fix
+- **CHANGED:** `calculate_setup_strength()` 4 parametre → 3 parametre
+- **REMOVED:** confidence parametresi (circular logic fix)
+- **NEW:** Volume VETO - düşük volume (<0.8) = max LOW confidence garantisi
+- **CHANGED:** Weight'ler: Volume %40, OB/FVG %40, R:R %20
+
+### Tracking Service - TF Bazlı Order Expiry
+- **NEW:** `check_and_expire_orders(exchange)` - TF bazlı otomatik expiry
+- **NEW:** `get_expiry_hours(timeframe)` - TF'ye göre expiry süresi
+  - 5m/3m setup → 2 saat sonra cancel
+  - 15m/30m/1h/4h setup → 4 saat sonra cancel
+
+### OB/FVG Detectors
+- **CHANGED:** `calculate_setup_strength()` 3 parametre ile çağrılıyor
+- **FIX:** Vol=0.63x artık LOW confidence döner (eskiden MEDIUM)
+
+### Telegram Handlers - Score Fix
+- **FIX:** f-string format hatası düzeltildi (`available_balance` ternary)
+
+### Main.py - Sadeleştirme
+- **REMOVED:** `ORDER_EXPIRY_HOURS` sabit (artık TF bazlı)
+- **CHANGED:** `calculate_setup_strength()` 3 parametre
+
+### 📁 Değişen Dosyalar (6 dosya)
+- `calculators.py` - Confidence fix + volume veto
+- `ob_detector.py` - 3 parametre
+- `fvg_detector.py` - 3 parametre
+- `tracking_service.py` - TF bazlı expiry
+- `telegram_handlers.py` - Score f-string fix
+- `main.py` - Expiry logic kaldırıldı + 3 parametre
+
+---
+**Deploy:** 6 dosya değişti
+
+---
 # T-TARS v2.3.10 - (2025-12-19)
 
 ## 🔧 Değişiklikler

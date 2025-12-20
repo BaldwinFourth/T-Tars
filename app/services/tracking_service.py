@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v2.2.8
-==============================
+T-TARS Tracking Service v2.3.11
+===============================
 Setup Logging & Performance Analytics Service
+
+v2.3.11:
+- NEW: check_and_expire_orders() - TF bazlı otomatik expiry
+  - 5m/3m → 2 saat
+  - 15m/30m/1h/4h → 4 saat
+- NEW: get_expiry_hours() - TF'ye göre expiry süresi
+- CHANGED: main.py'deki expiry logic buraya taşındı
 
 v2.2.8:
 - NEW: mark_setup_expired() - 4 saat sonra dolmayan emirler için
@@ -12,12 +19,6 @@ v2.2.4:
 - NEW: update_setup_from_bitget() - Bitget'ten gelen gerçek sonuçla güncelle
 - NEW: mark_setup_completed() - Manuel tamamlama
 - CHANGED: Artık sadece log tutuyor, takip Bitget API üzerinden yapılıyor
-
-v2.2.2:
-- FIX: log_setup KeyError hatası düzeltildi
-
-v2.2.1:
-- REMOVED: check_duplicate_setup() kaldırıldı
 """
 
 from google.cloud import storage
@@ -30,6 +31,32 @@ logger = logging.getLogger(__name__)
 
 TURKEY_TZ = timezone(timedelta(hours=3))
 MIN_TRADES_FOR_RANKING = 3
+
+# v2.3.11: TF bazlı expiry süreleri (saat)
+EXPIRY_HOURS_SHORT_TF = 2   # 5m, 3m
+EXPIRY_HOURS_LONG_TF = 4    # 15m, 30m, 1h, 4h
+
+
+def get_expiry_hours(timeframe):
+    """
+    v2.3.11: Timeframe'e göre expiry süresi döndür
+    
+    Args:
+        timeframe: '5m', '15m', '1h', '5D', '15D' vb.
+    
+    Returns:
+        int: Expiry süresi (saat)
+    """
+    short_tfs = ['3m', '5m', '3D', '5D']  # D = dakika formatı
+    
+    tf_lower = str(timeframe).lower()
+    
+    # 3m, 5m veya 3D, 5D → 2 saat
+    if tf_lower in ['3m', '5m'] or timeframe in short_tfs:
+        return EXPIRY_HOURS_SHORT_TF
+    
+    # Diğer tüm TF'ler → 4 saat
+    return EXPIRY_HOURS_LONG_TF
 
 
 def format_price(price):
@@ -57,13 +84,100 @@ def calculate_ranking_score(win_rate, trade_count):
 
 
 class TrackingService:
-    """Setup Logging & Performance Analytics Service v2.2.8"""
+    """Setup Logging & Performance Analytics Service v2.3.11"""
     
     def __init__(self, bucket_name='tars-trading-data'):
         self.bucket_name = bucket_name
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        logger.info(f"✅ Tracking Service v2.2.8 initialized: {bucket_name}")
+        logger.info(f"✅ Tracking Service v2.3.11 initialized: {bucket_name}")
+    
+    def check_and_expire_orders(self, exchange):
+        """
+        v2.3.11: TF bazlı otomatik expiry kontrolü
+        
+        Akış:
+        1. PENDING durumundaki tüm setup'ları al
+        2. Her birinin TF'sine göre expiry süresini hesapla
+        3. Süre dolduysa → Bitget'te cancel et → EXPIRED işaretle
+        
+        Args:
+            exchange: BitgetService instance (cancel_order için)
+        
+        Returns:
+            tuple: (expired_count, cancelled_order_ids)
+        """
+        expired_count = 0
+        cancelled_orders = []
+        now = datetime.now(TURKEY_TZ)
+        
+        try:
+            pending_setups = self.get_pending_setups()
+            
+            for setup in pending_setups:
+                try:
+                    setup_id = setup.get('setup_id')
+                    order_id = setup.get('order_id')
+                    status = setup.get('status')
+                    created_at_str = setup.get('created_at')
+                    timeframe = setup.get('timeframe', '15m')
+                    pair = setup.get('pair', '')
+                    
+                    # Sadece PENDING ve order_id olan emirler
+                    if status != 'PENDING' or not order_id or not created_at_str:
+                        continue
+                    
+                    # TF bazlı expiry süresi
+                    expiry_hours = get_expiry_hours(timeframe)
+                    
+                    # Yaş hesapla
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str)
+                        # Timezone aware yap
+                        if created_at.tzinfo is None:
+                            created_at = created_at.replace(tzinfo=TURKEY_TZ)
+                        age_hours = (now - created_at).total_seconds() / 3600
+                    except Exception as e:
+                        logger.error(f"Date parse error ({setup_id}): {e}")
+                        continue
+                    
+                    # Expiry kontrolü
+                    if age_hours >= expiry_hours:
+                        logger.info(f"⏰ Order expired ({age_hours:.1f}h >= {expiry_hours}h): {setup_id} [{timeframe}]")
+                        
+                        # 1. Bitget'te cancel et
+                        try:
+                            # Symbol format düzelt
+                            if '/' not in pair:
+                                symbol = f"{pair[:-4]}/{pair[-4:]}:{pair[-4:]}"
+                            else:
+                                symbol = pair
+                            
+                            cancel_result = exchange.cancel_order(order_id, symbol)
+                            
+                            if cancel_result.get('success'):
+                                cancelled_orders.append(order_id)
+                                logger.info(f"✅ Order cancelled: {order_id}")
+                            else:
+                                logger.warning(f"⚠️ Cancel failed: {order_id} - {cancel_result.get('error', 'Unknown')}")
+                        except Exception as e:
+                            logger.error(f"Cancel order error ({order_id}): {e}")
+                        
+                        # 2. EXPIRED işaretle (cancel başarısız olsa bile)
+                        self.mark_setup_expired(setup_id)
+                        expired_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"Expiry check error ({setup.get('setup_id')}): {e}")
+            
+            if expired_count > 0:
+                logger.info(f"📊 Expiry check complete: {expired_count} expired, {len(cancelled_orders)} cancelled")
+            
+            return expired_count, cancelled_orders
+            
+        except Exception as e:
+            logger.error(f"❌ check_and_expire_orders error: {e}")
+            return 0, []
     
     def log_setup(self, setup_data):
         """
@@ -140,7 +254,7 @@ class TrackingService:
                 'created_at': datetime.now(TURKEY_TZ).isoformat(),
                 'filled_at': None,
                 'closed_at': None,
-                'expired_at': None,  # v2.2.8
+                'expired_at': None,
                 'duration_minutes': None,
                 
                 # Bitget gerçek veriler - sonradan güncellenecek
@@ -166,7 +280,7 @@ class TrackingService:
     
     def mark_setup_expired(self, setup_id):
         """
-        v2.2.8: 4 saat dolunca emir iptal edildiğinde çağır
+        v2.2.8: Emir expire edildiğinde çağır
         
         Status: PENDING → EXPIRED
         """
@@ -193,9 +307,14 @@ class TrackingService:
             # Duration hesapla
             start_time = setup.get('created_at')
             if start_time:
-                start = datetime.fromisoformat(start_time)
-                now = datetime.now(TURKEY_TZ)
-                setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+                try:
+                    start = datetime.fromisoformat(start_time)
+                    if start.tzinfo is None:
+                        start = start.replace(tzinfo=TURKEY_TZ)
+                    now = datetime.now(TURKEY_TZ)
+                    setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+                except:
+                    pass
             
             blob.upload_from_string(
                 json.dumps(setup, indent=2),
@@ -268,9 +387,14 @@ class TrackingService:
                 
                 start_time = setup.get('filled_at') or setup.get('created_at')
                 if start_time:
-                    start = datetime.fromisoformat(start_time)
-                    now = datetime.now(TURKEY_TZ)
-                    setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+                    try:
+                        start = datetime.fromisoformat(start_time)
+                        if start.tzinfo is None:
+                            start = start.replace(tzinfo=TURKEY_TZ)
+                        now = datetime.now(TURKEY_TZ)
+                        setup['duration_minutes'] = round((now - start).total_seconds() / 60, 1)
+                    except:
+                        pass
             
             blob.upload_from_string(
                 json.dumps(setup, indent=2),
@@ -422,7 +546,7 @@ class TrackingService:
             losing_trades = 0
             breakeven_trades = 0
             pending_setups = 0
-            expired_setups = 0  # v2.2.8
+            expired_setups = 0
             
             starting_balance = real_balance if real_balance and real_balance > 0 else 500.0
             total_profit_loss = 0.0
@@ -459,7 +583,7 @@ class TrackingService:
                     result = setup.get('result')
                     status = setup.get('status')
                     
-                    # v2.2.8: EXPIRED status
+                    # EXPIRED status
                     if status == 'EXPIRED':
                         expired_setups += 1
                         timeframe_stats[tf]['expired'] += 1
@@ -579,7 +703,7 @@ class TrackingService:
                 'losing_trades': losing_trades,
                 'breakeven_trades': breakeven_trades,
                 'pending_setups': pending_setups,
-                'expired_setups': expired_setups,  # v2.2.8
+                'expired_setups': expired_setups,
                 'win_rate': round(win_rate, 1),
                 'loss_rate': round(loss_rate, 1),
                 'starting_balance': starting_balance,

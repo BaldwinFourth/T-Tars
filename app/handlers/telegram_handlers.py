@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.3.1
+T-TARS Telegram Handlers v2.3.11
 ================================
 Telegram bot komut handler'ları.
+
+v2.3.11:
+- FIX: /score f-string format hatası düzeltildi
+- FIX: available_balance ternary operatör sorunu çözüldü
 
 v2.3.1:
 - FIX: /score bakiye - Available yerine TOTAL bakiye gösteriliyor
@@ -66,7 +70,7 @@ def init_handlers(telegram, exchange, claude, storage, tracking):
     _storage = storage
     _tracking = tracking
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.3.1) - Trading: {_trading_enabled}")
+    logger.info(f"✅ Telegram handlers initialized (v2.3.11) - Trading: {_trading_enabled}")
 
 
 # --------------------------
@@ -345,7 +349,7 @@ def handle_scan_command(chat_id):
 
 
 def handle_score_command(chat_id):
-    """/score - Performans raporu v2.3.1"""
+    """/score - Performans raporu v2.3.11"""
     def run_score():
         try:
             if not _tracking:
@@ -370,6 +374,9 @@ def handle_score_command(chat_id):
             # v2.3.1: Total bakiyeyi göster
             display_balance = total_balance if total_balance and total_balance > 0 else stats.get('starting_balance', 500.0)
             
+            # v2.3.11 FIX: available_balance için safe değer
+            available_display = available_balance if available_balance else 0.0
+            
             profit_emoji = "📈" if stats['profit'] >= 0 else "📉"
             profit_sign = "+" if stats['profit'] >= 0 else ""
             
@@ -389,7 +396,7 @@ def handle_score_command(chat_id):
 
 {profit_emoji} *P/L Durumu*
 • Bakiye (Total): ${display_balance:,.2f}
-• Kullanılabilir: ${available_balance:,.2f if available_balance else 0:.2f}
+• Kullanılabilir: ${available_display:,.2f}
 • Kar/Zarar: {profit_sign}${stats['profit']:,.2f} ({profit_sign}%{stats['profit_percent']:.1f})
 """
 

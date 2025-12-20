@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Handlers Package v2.3.0
-==============================
-v2.3.0: execute_trade_for_setup kaldırıldı (bitget_service.py'ye taşındı)
+T-TARS Handlers Package v2.3.11
+===============================
+Telegram command handlers.
 """
 
 from .telegram_handlers import (

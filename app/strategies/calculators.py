@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.3.8
+T-TARS Trading Calculators v2.3.11
 ===================================
+v2.3.11:
+- CHANGED: calculate_setup_strength() 4 parametre → 3 parametre
+- REMOVED: confidence parametresi (circular logic fix)
+- NEW: Volume VETO - düşük volume = max LOW confidence garantisi
+- CHANGED: Weight'ler: Volume %40, OB/FVG %40, R:R %20
+
 v2.3.8:
 - DRY prensibi: Score'lar constant olarak tanımlandı
 - VOLUME_TRADEABLE_MIN eklendi (volume_analyzer ve claude_service import edecek)
-- DEFAULT_STRENGTH_SCORE ve DEFAULT_CONFIDENCE_SCORE eklendi
-- calculate_setup_strength() artık get_volume_score() ve get_rr_score() çağırıyor
-- Fine tuning için tüm değerler dosya başında
 
 Kullanım:
     from app.strategies.calculators import (
@@ -86,28 +89,21 @@ STRENGTH_MAP = {
 }
 
 # ============================================
-# CONFIDENCE MAPPING (Fine tuning buradan)
-# ============================================
-CONFIDENCE_MAP = {
-    'HIGH': 1.15,    # Bonus
-    'MEDIUM': 0.65,
-    'LOW': 0.25
-}
-
-# ============================================
 # FALLBACK DEFAULTS (Bilinmeyen değer gelirse)
 # ============================================
 DEFAULT_STRENGTH_SCORE = 0.25   # Bilinmeyen strength için
-DEFAULT_CONFIDENCE_SCORE = 0.25 # Bilinmeyen confidence için
 
 # ============================================
 # WEIGHT DISTRIBUTION (Fine tuning buradan)
+# v2.3.11: Confidence kaldırıldı (circular logic fix)
 # ============================================
-WEIGHT_VOLUME = 0.25       # Volume ağırlığı
-WEIGHT_STRENGTH = 0.25     # OB/FVG gücü ağırlığı
-WEIGHT_RR = 0.25           # Risk:Reward ağırlığı
-WEIGHT_CONFIDENCE = 0.25   # Güven ağırlığı
+WEIGHT_VOLUME = 0.40       # Volume ağırlığı - EN KRİTİK
+WEIGHT_STRENGTH = 0.40     # OB/FVG gücü ağırlığı
+WEIGHT_RR = 0.20           # Risk:Reward ağırlığı (genelde sabit 2.0)
 # Toplam = 1.0
+
+# Volume Veto Threshold
+VOLUME_VETO_MAX_SCORE = 0.45  # Volume < VOLUME_LOW ise max bu score
 
 
 # ============================================
@@ -192,32 +188,44 @@ def get_rr_score(rr_ratio):
         return SCORE_RR_ELSE
 
 
-def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio, confidence):
+def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio):
     """
     Setup gücünü hesapla (0-1 arası, bonus ile 1.0'ı aşabilir).
     
-    v2.3.8: DRY - get_volume_score() ve get_rr_score() çağrılıyor.
-    Fine tuning: Dosya başındaki constant'ları değiştir.
+    v2.3.11 DEĞİŞİKLİKLER:
+    - confidence parametresi KALDIRILDI (circular logic fix)
+    - Volume VETO eklendi: Volume < 0.8 → max 0.45 score (LOW garantisi)
+    - Weight'ler: Volume %40, OB/FVG %40, R:R %20
+    
+    Args:
+        volume_spike_ratio: Volume spike oranı (0.0 - 5.0+)
+        ob_or_fvg_strength: 'high', 'medium', 'low'
+        rr_ratio: Risk:Reward oranı (2.0+)
+    
+    Returns:
+        float: Setup strength score (0.0 - 1.2)
     """
-    # Volume Score (DRY - fonksiyon çağır)
+    # Volume Score
     volume_score = get_volume_score(volume_spike_ratio)
     
     # OB/FVG Strength Score
     strength_score = STRENGTH_MAP.get(ob_or_fvg_strength.lower(), DEFAULT_STRENGTH_SCORE)
     
-    # R:R Score (DRY - fonksiyon çağır)
+    # R:R Score
     rr_score = get_rr_score(rr_ratio)
-    
-    # Confidence Score
-    confidence_score = CONFIDENCE_MAP.get(confidence, DEFAULT_CONFIDENCE_SCORE)
     
     # Weighted Average
     overall_strength = (
         volume_score * WEIGHT_VOLUME +
         strength_score * WEIGHT_STRENGTH +
-        rr_score * WEIGHT_RR +
-        confidence_score * WEIGHT_CONFIDENCE
+        rr_score * WEIGHT_RR
     )
+    
+    # 🚨 VOLUME VETO: Düşük volume = maximum LOW confidence
+    # Volume < 0.8 ise, diğer faktörler ne kadar iyi olursa olsun
+    # score max 0.45'te kalır → _get_confidence_label() = LOW
+    if volume_spike_ratio < VOLUME_LOW:
+        overall_strength = min(overall_strength, VOLUME_VETO_MAX_SCORE)
     
     return overall_strength
 

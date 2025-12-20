@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.3.10
+T-TARS Trading Bot v2.3.11
 ==========================
 Main Flask application with routes.
+
+v2.3.11:
+- CHANGED: Expiry logic tracking_service'e taşındı
+- CHANGED: TF bazlı expiry (5m→2h, diğerleri→4h)
+- REMOVED: ORDER_EXPIRY_HOURS sabit - artık tracking_service'de
 
 v2.3.10:
 - FIX: python_score hesaplaması düzeltildi
@@ -18,25 +23,6 @@ v2.3.7:
 - ADD: cleanup_expired_volumes() çağrısı auto_analyze'da
 - ADD: Bar kapanışı timing kontrolü (5m bar + 1dk sonra çalış)
 - Detector'lar artık volume_analyzer'dan okuyabilir
-
-v2.3.6:
-- FIX: spike=0 artık kabul ediliyor (POST 400 hatası düzeltildi)
-- FIX: 'spike' field yoksa reddet, 0 değeri kabul et
-- Düşük volume = 0 demek, bu da geçerli bir değer!
-
-v2.3.4:
-- NEW: TradingView ATR Webhook entegrasyonu
-- CHANGED: VOLUME_CACHE → MARKET_CACHE (volume + ATR birlikte)
-- CHANGED: /webhook/volume → hem spike hem atr alır
-- NEW: ATR de cache'den okunuyor (TradingView Binance)
-- Fallback: Cache yoksa Bitget'ten hesaplama devam eder
-
-v2.3.3:
-- TradingView Volume Webhook entegrasyonu
-- /webhook/volume endpoint - Binance volume spike alır
-
-v2.3.0:
-- Claude AI karar mekanizması (evaluate_setup)
 """
 
 from flask import Flask, request, jsonify
@@ -48,7 +34,6 @@ from app.services.tracking_service import TrackingService
 from app.config import Config
 from app.strategies.setup_detector import detect_all_trading_setups
 from app.strategies.calculators import calculate_setup_strength
-# v2.3.7: Volume analyzer entegrasyonu
 from app.strategies.volume_analyzer import (
     store_volume, 
     get_volume, 
@@ -92,21 +77,12 @@ SCAN_LOCK = threading.Lock()
 
 # ============================================
 # v2.3.8: MARKET CACHE (TradingView'dan Volume + ATR)
-# HTF (15m, 30m, 1h) verileri 15 dakikada bir geliyor
-# TTL Config.MARKET_CACHE_TTL'den okunuyor (default 20 dakika)
 # ============================================
-# Format: {
-#   "BTCUSDT_15m": {"spike": 2.34, "atr": 125.5, "ts": 1702...},
-#   "ETHUSDT_1h": {"spike": 1.87, "atr": 45.2, "ts": 1702...}
-# }
 MARKET_CACHE = {}
-# v2.3.8: TTL artık Config'den (hardcoded değil)
 
 # Turkey timezone
 TURKEY_TZ = timezone(timedelta(hours=3))
-
-# Order expiry (4 saat)
-ORDER_EXPIRY_HOURS = 4
+# v2.3.11: ORDER_EXPIRY_HOURS kaldırıldı → tracking_service.get_expiry_hours()
 
 
 def format_price(price):
@@ -153,7 +129,6 @@ except Exception as e:
 
 @app.route('/', methods=['GET'])
 def index():
-    # v2.3.7: Volume store stats ekle
     vol_stats = get_volume_store_stats()
     return jsonify({
         "service": f"T-TARS Trading Bot v{Config.VERSION}",
@@ -180,47 +155,25 @@ def health():
 
 
 # ============================================
-# ROUTES - TRADINGVIEW MARKET WEBHOOK (v2.3.7)
+# ROUTES - TRADINGVIEW MARKET WEBHOOK
 # ============================================
 
 @app.route('/webhook/volume', methods=['POST'])
 def volume_webhook():
-    """
-    v2.3.7: TradingView Market Data Webhook (Volume + ATR)
-    
-    TradingView Pine Script'ten gelen volume spike ve ATR verisini cache'le.
-    Binance USDT-M Futures chartlarından alınıyor.
-    
-    v2.3.7: Hem MARKET_CACHE hem volume_analyzer'a yazılıyor
-    v2.3.6 FIX: spike=0 artık kabul ediliyor!
-    
-    Expected payload:
-    {
-        "pair": "BTCUSDT",      # veya "BTC" veya "BTCUSDT.P"
-        "tf": "15",             # veya "15m", "1h", "4h"
-        "spike": 2.34,          # volume spike ratio (0 da kabul!)
-        "atr": 125.5,           # ATR değeri (opsiyonel)
-        "price": 104500.50      # opsiyonel - current price
-    }
-    
-    Cache key format: "BTCUSDT_15m"
-    """
+    """TradingView Market Data Webhook (Volume + ATR)"""
     try:
         data = request.json
         if not data:
             return jsonify({"status": "error", "message": "No data"}), 400
         
-        # Pair normalize et
         pair = data.get('pair', '').upper()
         if not pair:
             return jsonify({"status": "error", "message": "Missing pair"}), 400
         
-        # Pair temizle: "BTCUSDT.P" → "BTCUSDT", "BTC" → "BTCUSDT"
         pair = pair.replace('.P', '').replace('PERP', '')
         if not pair.endswith('USDT'):
             pair = pair + 'USDT'
         
-        # Timeframe normalize et
         tf_raw = str(data.get('tf', '15'))
         tf_map = {
             '1': '1m', '3': '3m', '5': '5m', '15': '15m', '30': '30m',
@@ -230,22 +183,16 @@ def volume_webhook():
         }
         tf = tf_map.get(tf_raw, '15m')
         
-        # v2.3.6 FIX: spike field kontrolü - 0 DA KABUL!
         if 'spike' not in data:
             return jsonify({"status": "error", "message": "Missing spike field"}), 400
         
         spike = float(data.get('spike', 0))
-        
-        # v2.3.4: ATR değeri (opsiyonel)
         atr = float(data.get('atr', 0)) if data.get('atr') else 0
         
-        # Cache key oluştur
         cache_key = f"{pair}_{tf}"
         
-        # v2.3.7: Volume analyzer'a yaz (YENİ!)
         store_volume(pair, tf, spike, atr)
         
-        # MARKET_CACHE'e de yaz (backward compatibility)
         MARKET_CACHE[cache_key] = {
             'spike': round(spike, 2),
             'atr': round(atr, 6) if atr > 0 else 0,
@@ -254,7 +201,6 @@ def volume_webhook():
             'source': 'tradingview_binance'
         }
         
-        # Log mesajı - ATR için dinamik format (küçük değerler için 6 decimal)
         atr_str = f", ATR={atr:.6g}" if atr > 0 else ""
         logger.info(f"📊 Market Webhook: {cache_key} = {spike:.2f}x{atr_str} (Binance)")
         
@@ -285,12 +231,10 @@ def volume_cache_status():
             'age_seconds': age,
             'fresh': age < Config.MARKET_CACHE_TTL
         }
-        # v2.3.4: ATR varsa ekle
         if val.get('atr', 0) > 0:
             entry['atr'] = val.get('atr')
         cache_info.append(entry)
     
-    # v2.3.7: Volume store stats
     vol_stats = get_volume_store_stats()
     
     return jsonify({
@@ -332,7 +276,6 @@ def telegram_webhook():
         command = text.split()[0].split('@')[0].lower()
         logger.info(f"📱 CMD: {command}")
         
-        # Command routing
         if command == '/plan':
             handle_plan_command(text, chat_id)
         elif command == '/execute':
@@ -360,13 +303,11 @@ def telegram_webhook():
         elif command == '/startbitget':
             handle_startbitget_command(chat_id)
         elif command in ['/stopokx', '/startokx']:
-            # Legacy OKX commands → Bitget
             if 'stop' in command:
                 handle_stopbitget_command(chat_id)
             else:
                 handle_startbitget_command(chat_id)
         elif command == '/volume':
-            # v2.3.7: Volume store + market cache status
             cache_count = len(MARKET_CACHE)
             fresh_count = sum(1 for v in MARKET_CACHE.values() 
                            if (int(datetime.now().timestamp()) - v.get('ts', 0)) < Config.MARKET_CACHE_TTL)
@@ -393,28 +334,30 @@ def telegram_webhook():
 
 
 # ============================================
-# ROUTES - MONITORING
+# ROUTES - MONITORING (v2.3.11 - TF Bazlı Expiry)
 # ============================================
 
 @app.route('/monitor', methods=['POST', 'GET'])
 def monitor_setups():
     """
-    v2.3.0: Bitget Bazlı Monitor + Order Expiry
+    v2.3.11: Bitget Bazlı Monitor + TF Bazlı Order Expiry
     
-    1. Bekleyen limit emirleri kontrol et
-    2. 4 saat geçen PENDING emirleri iptal et
-    3. Emir dolmuşsa → trackingNo al, status güncelle
-    4. Copy Trade pozisyonlarını kontrol et
+    1. TF bazlı expiry kontrolü (tracking_service.check_and_expire_orders)
+       - 5m/3m → 2 saat sonra cancel
+       - 15m/30m/1h/4h → 4 saat sonra cancel
+    2. Emir dolmuşsa → trackingNo al, status güncelle
+    3. Copy Trade pozisyonlarını kontrol et
     """
     try:
         if not is_trading_enabled():
             return jsonify({"status": "skipped", "reason": "trading_disabled"}), 200
         
         updates = 0
-        expired_count = 0
-        now = datetime.now(TURKEY_TZ)
         
-        # ADIM 1: Bekleyen emirleri kontrol et
+        # ADIM 1: TF bazlı order expiry kontrolü (tracking_service'de)
+        expired_count, cancelled_orders = tracking.check_and_expire_orders(bitget)
+        
+        # ADIM 2: Bekleyen emirlerin trackingNo kontrolü
         pending_setups = tracking.get_pending_setups()
         
         for setup in pending_setups:
@@ -425,27 +368,8 @@ def monitor_setups():
                 pair = setup.get('pair')
                 direction = setup.get('direction', 'long')
                 status = setup.get('status')
-                created_at_str = setup.get('created_at')
                 
-                # 4 saat expiry kontrolü
-                if status == 'PENDING' and order_id and created_at_str:
-                    try:
-                        created_at = datetime.fromisoformat(created_at_str)
-                        age_hours = (now - created_at).total_seconds() / 3600
-                        
-                        if age_hours >= ORDER_EXPIRY_HOURS:
-                            logger.info(f"⏰ Order expired ({age_hours:.1f}h): {setup_id}")
-                            
-                            symbol = f"{pair[:-4]}/{pair[-4:]}:{pair[-4:]}" if '/' not in pair else pair
-                            bitget.cancel_order(order_id, symbol)
-                            tracking.mark_setup_expired(setup_id)
-                            expired_count += 1
-                            continue
-                            
-                    except Exception as e:
-                        logger.error(f"Expiry check error ({setup_id}): {e}")
-                
-                # trackingNo kontrolü
+                # trackingNo kontrolü - emir doldu mu?
                 if not tracking_no and order_id and status == 'PENDING':
                     symbol = f"{pair[:-4]}/{pair[-4:]}:{pair[-4:]}" if '/' not in pair else pair
                     found_tracking_no = bitget.find_tracking_no_by_symbol(symbol, direction)
@@ -458,7 +382,7 @@ def monitor_setups():
             except Exception as e:
                 logger.error(f"Pending setup error ({setup.get('setup_id')}): {e}")
         
-        # ADIM 2: Copy Trade pozisyonlarını kontrol et
+        # ADIM 3: Copy Trade pozisyonlarını kontrol et
         try:
             ct_result = bitget.get_tracking_orders()
             
@@ -495,44 +419,23 @@ def monitor_setups():
 
 
 # ============================================
-# ROUTES - AUTO ANALYZE (v2.3.8 - Volume Analyzer)
+# ROUTES - AUTO ANALYZE
 # ============================================
 
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
     """
     v2.3.8: Otomatik Tarama + Volume Analyzer + Claude AI
-    
-    Akış:
-    1. Market verisi topla (volume_analyzer ile)
-    2. Setup'ları tespit et (Python)
-    3. Setup puanı hesapla (calculators.py)
-    4. Claude AI değerlendir → ENTER / SKIP / WAIT
-    5. Sadece ENTER kararı varsa emir aç
-    6. Telegram bildirimi gönder
-    
-    v2.3.8:
-    - MARKET_CACHE_TTL 300→1200 (HTF verisi expire olmuyordu)
-    v2.3.7: 
-    - Volume analyzer entegrasyonu
-    - Bar kapanışı timing kontrolü (5m bar kapandıktan 1 dk sonra)
-    v2.3.3: TradingView'dan gelen volume spike kullanılıyor
-    v2.3.1 FIX: setup['pair'] = pair eklendi!
     """
-    # v2.3.7: Bar kapanışı timing kontrolü
-    # 5m bar xx:00, xx:05, xx:10... kapanır → webhook gelir
-    # xx:01, xx:06, xx:11... çalış → fresh data!
-    # Cloud Scheduler her MONITOR_INTERVAL_MINUTES çağırır
     interval = Config.MONITOR_INTERVAL_MINUTES
     current_minute = datetime.now().minute
     if current_minute % interval != 1:
-        logger.debug(f"⏳ Analyze skipped: minute={current_minute}, interval={interval}, waiting for bar close +1")
+        logger.debug(f"⏳ Analyze skipped: minute={current_minute}, interval={interval}")
         return jsonify({
             "status": "skipped", 
             "reason": "waiting_for_bar_close",
             "current_minute": current_minute,
-            "interval": interval,
-            "next_run": f"xx:{((current_minute // interval) + 1) * interval + 1:02d}"
+            "interval": interval
         }), 200
     
     if SCAN_LOCK.locked():
@@ -541,14 +444,12 @@ def auto_analyze():
 
     with SCAN_LOCK:
         try:
-            logger.info(f"🔄 Auto analyze started (v{Config.VERSION} - TradingView Volume + ATR)")
+            logger.info(f"🔄 Auto analyze started (v{Config.VERSION})")
             
-            # v2.3.7: Volume analyzer temizliği
             vol_cleaned = cleanup_expired_volumes()
             if vol_cleaned > 0:
                 logger.info(f"🧹 Volume store temizlendi: {vol_cleaned} expired entry")
             
-            # v2.3.8: Eski cache entry'lerini temizle (MARKET_CACHE - 20dk TTL)
             now_ts = int(datetime.now().timestamp())
             expired_keys = [k for k, v in MARKET_CACHE.items() 
                           if (now_ts - v.get('ts', 0)) > Config.MARKET_CACHE_TTL]
@@ -556,9 +457,8 @@ def auto_analyze():
                 del MARKET_CACHE[k]
             
             if expired_keys:
-                logger.info(f"🧹 Market cache temizlendi: {len(expired_keys)} eski entry (TTL={Config.MARKET_CACHE_TTL}s)")
+                logger.info(f"🧹 Market cache temizlendi: {len(expired_keys)} eski entry")
             
-            # Balance çek
             current_balance = 500.0
             total_balance = 500.0
             try:
@@ -574,19 +474,15 @@ def auto_analyze():
             total_setups = 0
             orders_placed = 0
             claude_skips = 0
-            
-            # v2.3.4: Market cache log (Volume + ATR)
             cache_hits = 0
             cache_misses = 0
             
             for pair in pairs:
                 try:
-                    # 1. Market verisi topla (v2.3.4: market_cache parametresi - Volume + ATR)
                     market_data = bitget.get_complete_analysis_data(pair, market_cache=MARKET_CACHE)
                     if not market_data:
                         continue
                     
-                    # v2.3.3: Cache hit/miss say
                     volume_data = market_data.get('volume', {})
                     for tf, vol_info in volume_data.items():
                         if vol_info.get('source') == 'tradingview_binance':
@@ -594,32 +490,26 @@ def auto_analyze():
                         else:
                             cache_misses += 1
                     
-                    # 2. Setup'ları tespit et
                     setups = detect_all_trading_setups(pair, market_data)
                     
                     if not setups:
                         continue
                     
                     for setup in setups:
-                        # v2.3.1 FIX: pair'i setup'a ekle!
                         setup['pair'] = pair
                         
-                        # Trading kontrolü
                         if not is_trading_enabled():
                             logger.info(f"⏸️ Trading kapalı, atlanıyor: {pair}")
                             continue
                         
-                        # 3. Python puanı hesapla
-                        # v2.3.10: OB için ob_strength, FVG için fvg_strength
                         setup_strength = setup.get('ob_strength') or setup.get('fvg_strength', 'medium')
+                        # v2.3.11: 3 parametre (confidence kaldırıldı)
                         python_score = calculate_setup_strength(
                             volume_spike_ratio=setup.get('volume_spike_ratio', 0),
                             ob_or_fvg_strength=setup_strength,
-                            rr_ratio=setup.get('rr_ratio', 0),
-                            confidence=setup.get('confidence', 'MEDIUM')
+                            rr_ratio=setup.get('rr_ratio', 0)
                         )
                         
-                        # 4. Claude AI değerlendir
                         direction = setup.get('direction', 'LONG')
                         timeframe = setup.get('timeframe', 'N/A')
                         logger.info(f"🧠 Claude değerlendiriyor: {pair} {direction} [{timeframe}]")
@@ -630,7 +520,6 @@ def auto_analyze():
                             python_score=python_score
                         )
                         
-                        # 5. Karar: ENTER / SKIP / WAIT
                         action = decision.get('action', 'SKIP')
                         confidence = decision.get('confidence', 0)
                         reasoning = decision.get('reasoning', 'N/A')
@@ -644,16 +533,13 @@ def auto_analyze():
                             logger.info(f"⏸️ Claude WAIT: {pair} [{timeframe}] - {reasoning}")
                             continue
                         
-                        # ENTER - Emir aç
                         if action == 'ENTER':
                             logger.info(f"✅ Claude ENTER: {pair} [{timeframe}] ({confidence}%) - {reasoning}")
                             
-                            # v2.3.2: Adjusted değerler varsa kullan
                             adjustments = decision.get('adjustments', {})
                             stop_price = adjustments.get('stop_price', setup.get('stop_price'))
                             tp1_price = adjustments.get('tp1_price', setup.get('tp1_price'))
                             
-                            # 6. Emir aç
                             exec_result = bitget.execute_trade_for_setup(
                                 setup_data={
                                     'pair': pair,
@@ -668,7 +554,6 @@ def auto_analyze():
                             if exec_result.get('success'):
                                 orders_placed += 1
                                 
-                                # Tracking'e kaydet
                                 setup_data = {
                                     'pair': pair.replace('/USDT:USDT', 'USDT'),
                                     'setup_type': setup.get('type', 'UNKNOWN'),
@@ -693,12 +578,10 @@ def auto_analyze():
                                     'tracking_no': exec_result.get('tracking_no'),
                                     'contracts': exec_result.get('contracts', 0),
                                     'position_usd': exec_result.get('position_usd', 0),
-                                    # Claude AI bilgileri
                                     'claude_action': action,
                                     'claude_confidence': confidence,
                                     'claude_reasoning': reasoning,
                                     'python_score': python_score,
-                                    # v2.3.2: Adjustment bilgisi
                                     'stop_adjusted': adjustments.get('adjusted', False),
                                     'adjustment_type': adjustments.get('type'),
                                 }
@@ -708,11 +591,9 @@ def auto_analyze():
                                 if setup_id:
                                     total_setups += 1
                                     
-                                    # Telegram bildirimi
                                     coin_name = pair.replace('/USDT:USDT', '')
                                     dir_emoji = "🟢" if direction == "LONG" else "🔴"
                                     
-                                    # v2.3.2: Adjustment bilgisi göster
                                     adj_info = ""
                                     if adjustments.get('adjusted'):
                                         adj_info = f"\n⚙️ Stop Adj: {adjustments.get('type', 'N/A')}"
@@ -741,7 +622,6 @@ def auto_analyze():
 """
                                     telegram.send(notify_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                             else:
-                                # Hata bildirimi
                                 error = exec_result.get('error', 'Unknown')
                                 logger.error(f"❌ Execute failed: {pair} [{timeframe}] - {error}")
                                 telegram.send(f"❌ *EMİR HATASI*\n\n{pair} [{timeframe}]\nHata: {error}", chat_id=Config.TELEGRAM_CHAT_ID)
@@ -749,9 +629,8 @@ def auto_analyze():
                 except Exception as e:
                     logger.error(f"Pair analyze error ({pair}): {e}")
             
-            # v2.3.7: Volume store stats
             vol_stats = get_volume_store_stats()
-            logger.info(f"✅ Auto analyze: {orders_placed} orders, {claude_skips} skipped | Cache: {cache_hits} hits, {cache_misses} misses | Store: {vol_stats.get('total', 0)} entries")
+            logger.info(f"✅ Auto analyze: {orders_placed} orders, {claude_skips} skipped | Cache: {cache_hits} hits, {cache_misses} misses")
             gc.collect()
             
             return jsonify({
@@ -774,5 +653,5 @@ def auto_analyze():
 # ============================================
 
 if __name__ == '__main__':
-    logger.info(f"🚀 Starting T-TARS v{Config.VERSION} (TradingView Volume + Claude AI)")
+    logger.info(f"🚀 Starting T-TARS v{Config.VERSION}")
     app.run(host='0.0.0.0', port=Config.PORT, debug=False, threaded=True)

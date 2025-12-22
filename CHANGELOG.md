@@ -1,3 +1,59 @@
+## v2.3.14 - Copy Trade API + Duplicate Kontrolü
+**Tarih:** 2024-12-22
+
+### main.py
+- **NEW:** Duplicate order kontrolü (ENTER öncesi)
+- `tracking.check_duplicate_setup()` ile kontrol
+- DUPLICATE → skip, UPDATE_NEEDED → yeni order aç
+
+### bitget_service.py
+- **NEW:** `place_copy_trade_order()` - Copy Trade API endpoint
+- **CHANGED:** `place_order_with_tp_sl()` → Copy Trade API kullanıyor
+- **FIXED:** trackingNo:None sorunu çözüldü
+
+### tracking_service.py
+- **NEW:** `check_duplicate_setup(coin, direction, entry, tp, sl)`
+- Returns: `NEW` | `DUPLICATE` | `UPDATE_NEEDED`
+
+---
+
+# T-TARS v2.3.13 - Limit emir kapatma
+**Tarih:** 2024-12-22
+
+### Değişiklikler
+- **bitget_service.py**: `close_position()` - Market → Limit close
+  - Yeni parametreler: `order_type`, `slippage_pct`
+  - LONG kapatma: `price * (1 - slippage)` 
+  - SHORT kapatma: `price * (1 + slippage)`
+  - Fiyat alınamazsa market'e fallback
+
+- **config.py**: Limit close parametreleri
+  - `CLOSE_ORDER_TYPE = 'limit'`
+  - `CLOSE_SLIPPAGE_PCT = 0.002` (%0.2)
+
+---
+
+# T-TARS v2.3.12 - Api Key + Parite güncelleme
+**Tarih:** 2024-12-22
+
+## 🔧 Değişiklikler
+
+### Config - Pair ve Timeframe Güncellemesi
+- **REMOVED:** 5m timeframe (PineScript pasife alındı)
+- **REMOVED:** BGB/USDT (AUTO_SCAN_PAIRS ve MANUAL_PAIRS'den çıkarıldı)
+- **ADDED:** XRP/USDT, TRX/USDT (AUTO_SCAN_PAIRS'e eklendi)
+
+### API Key
+- **UPDATED:** Bitget API key güncellendi (ENV)
+
+### 📁 Değişen Dosyalar (1 dosya)
+- `config.py` - Timeframe ve pair güncellemesi
+
+---
+**Deploy:** 1 dosya değişti
+
+---
+
 # T-TARS v2.3.11 - (2025-12-20)
 
 ## 🔧 Değişiklikler
@@ -32,9 +88,13 @@
 - `tracking_service.py` - TF bazlı expiry
 - `telegram_handlers.py` - Score f-string fix
 - `main.py` - Expiry logic kaldırıldı + 3 parametre
+- `app/__init__.py` - Versiyon güncelleme
+- `app/handlers/__init__.py` - Versiyon güncelleme
+- `app/services/__init__.py` - BitgetService eklendi
+- `app/strategies/__init__.py` - Yeni export'lar
 
 ---
-**Deploy:** 6 dosya değişti
+**Deploy:** 11 dosya değişti
 
 ---
 # T-TARS v2.3.10 - (2025-12-19)

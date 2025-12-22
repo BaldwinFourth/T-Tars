@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v2.3.11
+T-TARS Tracking Service v2.3.14
 ===============================
 Setup Logging & Performance Analytics Service
+
+v2.3.14:
+- NEW: check_duplicate_setup() - Duplicate order kontrolü
+  - Aynı coin + direction için açık order var mı?
+  - Entry/TP/SL aynı mı kontrol et
+  - Returns: NEW, DUPLICATE, UPDATE_NEEDED
 
 v2.3.11:
 - NEW: check_and_expire_orders() - TF bazlı otomatik expiry
@@ -84,7 +90,7 @@ def calculate_ranking_score(win_rate, trade_count):
 
 
 class TrackingService:
-    """Setup Logging & Performance Analytics Service v2.3.11"""
+    """Setup Logging & Performance Analytics Service v2.3.14"""
     
     def __init__(self, bucket_name='tars-trading-data'):
         self.bucket_name = bucket_name
@@ -531,6 +537,123 @@ class TrackingService:
         except Exception as e:
             logger.error(f"❌ Get pending setups error: {e}")
             return []
+    
+    def check_duplicate_setup(self, coin, direction, entry_price=None, tp_price=None, sl_price=None, price_tolerance=0.001):
+        """
+        v2.3.14: Duplicate setup kontrolü
+        
+        Aynı coin + direction için açık limit order var mı kontrol eder.
+        
+        Args:
+            coin: 'BTC', 'ETH', 'BTCUSDT' vb.
+            direction: 'LONG' veya 'SHORT'
+            entry_price: Yeni setup entry fiyatı (opsiyonel)
+            tp_price: Yeni setup TP fiyatı (opsiyonel)
+            sl_price: Yeni setup SL fiyatı (opsiyonel)
+            price_tolerance: Fiyat karşılaştırma toleransı (%0.1 = 0.001)
+        
+        Returns:
+            dict: {
+                'status': 'NEW' | 'DUPLICATE' | 'UPDATE_NEEDED',
+                'existing_setup': {...} veya None,
+                'reason': str
+            }
+        
+        Mantık:
+            1. Aynı coin + direction için PENDING order var mı?
+            2. VAR → Entry/TP/SL aynı mı? (tolerans dahilinde)
+                - AYNI → DUPLICATE (skip)
+                - FARKLI → UPDATE_NEEDED (güncelle veya yeni kur)
+            3. YOK → NEW (yeni order aç)
+        """
+        try:
+            # Coin formatını normalize et
+            clean_coin = coin.upper().replace('USDT', '').replace('/USDT:USDT', '').replace('/USDT', '')
+            direction_upper = direction.upper()
+            
+            # PENDING setup'ları al
+            pending_setups = self.get_pending_setups()
+            
+            # Aynı coin + direction olanları filtrele
+            matching_setups = []
+            for setup in pending_setups:
+                setup_coin = setup.get('pair', '').upper().replace('USDT', '').replace('/USDT:USDT', '').replace('/USDT', '')
+                setup_direction = setup.get('direction', '').upper()
+                setup_status = setup.get('status', '')
+                
+                # Sadece PENDING olanlar (limit order bekleyenler)
+                if setup_status != 'PENDING':
+                    continue
+                
+                if setup_coin == clean_coin and setup_direction == direction_upper:
+                    matching_setups.append(setup)
+            
+            # Eşleşen yok → NEW
+            if not matching_setups:
+                logger.info(f"✅ {clean_coin} {direction_upper}: No existing order → NEW")
+                return {
+                    'status': 'NEW',
+                    'existing_setup': None,
+                    'reason': 'No existing PENDING order for this coin+direction'
+                }
+            
+            # Eşleşen var → Entry/TP/SL karşılaştır
+            # En son oluşturulanı al
+            matching_setups.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            existing = matching_setups[0]
+            
+            # Fiyat karşılaştırma fonksiyonu
+            def prices_match(new_price, existing_price, tolerance=price_tolerance):
+                if new_price is None or existing_price is None:
+                    return True  # Fiyat yoksa karşılaştırma yapma
+                if new_price == 0 or existing_price == 0:
+                    return True
+                diff_pct = abs(new_price - existing_price) / existing_price
+                return diff_pct <= tolerance
+            
+            existing_entry = existing.get('entry_price', 0)
+            existing_tp = existing.get('tp1_price', 0)
+            existing_sl = existing.get('stop_price', 0)
+            
+            # Entry/TP/SL karşılaştır
+            entry_match = prices_match(entry_price, existing_entry)
+            tp_match = prices_match(tp_price, existing_tp)
+            sl_match = prices_match(sl_price, existing_sl)
+            
+            if entry_match and tp_match and sl_match:
+                # Hepsi aynı → DUPLICATE
+                logger.info(f"⚠️ {clean_coin} {direction_upper}: DUPLICATE detected! "
+                           f"Existing: {existing.get('setup_id')} Entry={format_price(existing_entry)}")
+                return {
+                    'status': 'DUPLICATE',
+                    'existing_setup': existing,
+                    'reason': f"Same Entry/TP/SL already exists (setup_id: {existing.get('setup_id')})"
+                }
+            else:
+                # Fiyatlar farklı → UPDATE_NEEDED
+                diff_info = []
+                if not entry_match:
+                    diff_info.append(f"Entry: {format_price(existing_entry)}→{format_price(entry_price)}")
+                if not tp_match:
+                    diff_info.append(f"TP: {format_price(existing_tp)}→{format_price(tp_price)}")
+                if not sl_match:
+                    diff_info.append(f"SL: {format_price(existing_sl)}→{format_price(sl_price)}")
+                
+                logger.info(f"🔄 {clean_coin} {direction_upper}: UPDATE_NEEDED - {', '.join(diff_info)}")
+                return {
+                    'status': 'UPDATE_NEEDED',
+                    'existing_setup': existing,
+                    'reason': f"Price difference detected: {', '.join(diff_info)}"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ check_duplicate_setup error: {e}")
+            # Hata durumunda NEW döndür (order açılsın)
+            return {
+                'status': 'NEW',
+                'existing_setup': None,
+                'reason': f'Error during check: {str(e)}'
+            }
     
     def get_aggregate_stats(self, real_balance=None):
         """

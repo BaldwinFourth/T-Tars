@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.3.11
+T-TARS Trading Bot v2.3.14
 ==========================
 Main Flask application with routes.
+
+v2.3.14:
+- NEW: Duplicate order kontrolü (tracking.check_duplicate_setup)
+- CHANGED: Order açmadan önce aynı coin+direction kontrolü
+- CHANGED: Copy Trade API trackingNo desteği
 
 v2.3.11:
 - CHANGED: Expiry logic tracking_service'e taşındı
@@ -535,6 +540,25 @@ def auto_analyze():
                         
                         if action == 'ENTER':
                             logger.info(f"✅ Claude ENTER: {pair} [{timeframe}] ({confidence}%) - {reasoning}")
+                            
+                            # v2.3.14: Duplicate order kontrolü
+                            coin_name = pair.replace('/USDT:USDT', '')
+                            dup_check = tracking.check_duplicate_setup(
+                                coin=coin_name,
+                                direction=direction,
+                                entry_price=setup.get('entry_price'),
+                                tp_price=setup.get('tp1_price'),
+                                sl_price=setup.get('stop_price')
+                            )
+                            
+                            if dup_check['status'] == 'DUPLICATE':
+                                logger.info(f"⚠️ DUPLICATE: {coin_name} {direction} [{timeframe}] - Skipping")
+                                continue
+                            
+                            if dup_check['status'] == 'UPDATE_NEEDED':
+                                logger.info(f"🔄 UPDATE_NEEDED: {coin_name} {direction} - {dup_check['reason']}")
+                                # TODO: Mevcut order'ı cancel edip yenisini açabilirsin
+                                # Şimdilik yeni order aç (eski expire olacak)
                             
                             adjustments = decision.get('adjustments', {})
                             stop_price = adjustments.get('stop_price', setup.get('stop_price'))

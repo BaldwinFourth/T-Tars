@@ -1,23 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.3.8
-===========================
+T-TARS Configuration v2.3.13
+============================
+
+v2.3.13:
+- NEW: CLOSE_ORDER_TYPE = 'limit' (market yerine limit close)
+- NEW: CLOSE_SLIPPAGE_PCT = 0.002 (%0.2 slippage)
+
+v2.3.12:
+- REMOVED: 5m timeframe (PineScript pasife alındı)
+- REMOVED: BGB/USDT (çıkarıldı)
+- ADDED: XRP/USDT, TRX/USDT (AUTO_SCAN_PAIRS'e eklendi)
 
 v2.3.8:
 - NEW: MARKET_CACHE_TTL = 1200 (20 dakika) - HTF verileri için
 - CHANGED: STOP_DISTANCE_MAX = 0.025 (%2.5) - Claude prompt ile tutarlı
-
-v2.3.7:
-- CHANGED: MONITOR_INTERVAL_MINUTES = 5 (bar kapanışı timing ile uyum)
-
-v2.2.6:
-- CHANGED: AUTO_SCAN_PAIRS 9 coine düşürüldü (log kirliliği azaltma)
-
-v2.2.2:
-- FIX: 2h timeframe kaldırıldı (CCXT Bitget bug - GitHub #27281)
-
-v2.2.0:
-- CHANGED: OKX → Bitget API geçişi
 """
 
 import os
@@ -25,7 +22,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.3.8"""
+    """T-TARS Configuration v2.3.13"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -81,16 +78,15 @@ class Config:
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
     
     # ============================================
-    # TIMEFRAMES (v2.2.2)
+    # TIMEFRAMES (v2.3.12 - 5m kaldırıldı)
     # ============================================
-    # 2h kaldırıldı - CCXT Bitget bug (GitHub #27281)
-    TIMEFRAMES = ['1h', '30m', '15m', '5m']
+    TIMEFRAMES = ['1h', '30m', '15m']
     
     # ============================================
-    # TRADING PAIRS (v2.2.8 - Sadece 7 coin)
+    # TRADING PAIRS (v2.3.12)
     # ============================================
     
-    # Auto-scan listesi (7 coin - log kirliliği azaltma)
+    # Auto-scan listesi (v2.3.12: BGB çıktı, XRP/TRX eklendi)
     AUTO_SCAN_PAIRS = [
         'BTC/USDT:USDT',   # Bitcoin
         'ETH/USDT:USDT',   # Ethereum
@@ -98,7 +94,8 @@ class Config:
         'BNB/USDT:USDT',   # BNB
         'XAU/USDT:USDT',   # Gold
         'JUP/USDT:USDT',   # Jupiter
-        'BGB/USDT:USDT',   # Bitget Token
+        'XRP/USDT:USDT',   # Ripple
+        'TRX/USDT:USDT',   # Tron
     ]
     
     # Manuel /plan için (genişletilmiş liste)
@@ -109,7 +106,7 @@ class Config:
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
         'PUMP/USDT:USDT', 'BCH/USDT:USDT',
-        'XAU/USDT:USDT', 'FLOKI/USDT:USDT', 'BGB/USDT:USDT',
+        'XAU/USDT:USDT', 'FLOKI/USDT:USDT',
     ]
     
     # ============================================
@@ -125,6 +122,10 @@ class Config:
     MARGIN_MIN_PERCENT = float(os.getenv('MARGIN_MIN_PERCENT', '1.0'))  # %1
     MARGIN_MAX_PERCENT = float(os.getenv('MARGIN_MAX_PERCENT', '2.0'))  # %2
     
+    # Limit Close (v2.3.13)
+    CLOSE_ORDER_TYPE = os.getenv('CLOSE_ORDER_TYPE', 'limit')  # 'limit' veya 'market'
+    CLOSE_SLIPPAGE_PCT = float(os.getenv('CLOSE_SLIPPAGE_PCT', '0.002'))  # %0.2
+    
     # Safety limits
     MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '500'))
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
@@ -136,8 +137,7 @@ class Config:
     # HTF (15m, 30m, 1h) verileri 15 dakikada bir geliyor → 20 dakika TTL yeterli
     MARKET_CACHE_TTL = int(os.getenv('MARKET_CACHE_TTL', '1200'))  # 20 dakika (saniye)
     
-    # Bar kapanışı timing: 5m barlar xx:00, xx:05... kapanır
-    # Analyze xx:01, xx:06... çalışır (webhook geldikten sonra)
+    # Bar kapanışı timing: 15m barlar xx:00, xx:15... kapanır
     MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))
     PORT = int(os.getenv('PORT', '8080'))
     

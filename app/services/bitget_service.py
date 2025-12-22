@@ -675,11 +675,7 @@ class BitgetService:
 
     def place_order_with_tp_sl(self, symbol, side, entry_price, stop_price, tp_price=None):
         """
-        v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-
-v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
+        v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
         
         Eski CCXT versiyonu yerine Copy Trade API kullanır.
         """
@@ -733,11 +729,7 @@ v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': result.get('tracking_no'),  # v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-
-v2.3.14: trackingNo eklendi
+                    'tracking_no': result.get('tracking_no'),  # v2.3.14: trackingNo eklendi
                     'contracts': contracts,
                     'entry_price': entry_price,
                     'margin_usd': actual_margin,
@@ -909,11 +901,7 @@ v2.3.14: trackingNo eklendi
 
     def execute_trade_for_setup(self, setup_data, claude_decision=None):
         """
-        v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-
-v2.3.14: Unified Trade Execution - Copy Trade API ile
+        v2.3.14: Unified Trade Execution - Copy Trade API ile
         tracking_no döndürür
         """
         try:
@@ -959,11 +947,7 @@ v2.3.14: Unified Trade Execution - Copy Trade API ile
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': tracking_no,  # v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-
-v2.3.14: trackingNo eklendi
+                    'tracking_no': tracking_no,  # v2.3.14: trackingNo eklendi
                     'contracts': result.get('contracts', 0),
                     'margin_usd': result.get('margin_usd', 0),
                     'position_usd': result.get('position_usd', 0),

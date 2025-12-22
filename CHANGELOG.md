@@ -1,5 +1,21 @@
 # T-TARS Trading Bot - CHANGELOG
 
+## v2.4.1 (2025-12-22)
+
+### ADDED
+- **Detayli Log'lar:** Fibo zone reject, Bias mismatch, PDC is_doji
+- **Fibo Zone Reject:** Her reject'te fibo % gosteriliyor
+- **Bias Mismatch:** OB/FVG type ile bias uyumsuzlugu loglanıyor
+- **PDC Doji:** Doji uyarısında PDC_is_Doji bilgisi eklendi
+
+### CHANGED
+- setup_detector.py: Fibo filtreleme detaylı log ile
+
+### FILES CHANGED
+- `setup_detector.py` - Detaylı log'lar eklendi
+
+---
+
 ## v2.4.0 (2024-12-22)
 
 ### 🚀 MAJOR: Strateji Yeniden Yapılandırma

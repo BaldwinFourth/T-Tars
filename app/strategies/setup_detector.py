@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v2.4.0
+T-TARS Setup Detector v2.4.1
 =============================
 Trading setup orchestrator with PDC bias + Fibo zone filtering.
+
+v2.4.1:
+- ADDED: Detaylı log'lar (Fibo zone reject, Bias mismatch, PDC is_doji)
+- ADDED: Fibo zone reject log'unda fibo % gösteriliyor
+- ADDED: Bias mismatch durumunda log
 
 v2.4.0:
 - NEW: PDC bias belirleme (yeşil=LONG, kırmızı=SHORT)
@@ -58,7 +63,7 @@ def detect_trading_setup(pair, market_data):
             fibo_data = calculate_fibo_zones(pdc, bias)
             
             if doji_warning:
-                logger.info(f"⚠️ {pair}: Doji uyarısı! Reversal mode: {reversal_mode}")
+                logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, PDC_is_Doji={pdc_result['pdc_is_doji']}, Reversal={reversal_mode}")
         else:
             # Fallback: Eski yöntem
             pdc = market_data.get('previous_day', {})
@@ -80,9 +85,33 @@ def detect_trading_setup(pair, market_data):
         
         # v2.4.0: Fibo zone filtresi
         if fibo_data:
-            obs = [ob for ob in obs if is_in_ob_zone(ob.get('mid', (ob['high']+ob['low'])/2), fibo_data)]
-            fvgs = [fvg for fvg in fvgs if is_in_fvg_zone(fvg.get('mid', (fvg['high']+fvg['low'])/2), fibo_data)]
-            logger.debug(f"📐 {pair}: Fibo filtre sonrası OB={len(obs)}, FVG={len(fvgs)}")
+            obs_before = len(obs)
+            fvgs_before = len(fvgs)
+            
+            # OB filtreleme (detaylı log ile)
+            filtered_obs = []
+            for ob in obs:
+                ob_mid = ob.get('mid', (ob['high']+ob['low'])/2)
+                if is_in_ob_zone(ob_mid, fibo_data):
+                    filtered_obs.append(ob)
+                else:
+                    fibo_pct = ((fibo_data['pdc_high'] - ob_mid) / (fibo_data['pdc_high'] - fibo_data['pdc_low'])) * 100 if fibo_data['pdc_high'] != fibo_data['pdc_low'] else 0
+                    logger.info(f"📐 {pair}: OB {ob['type']} [{timeframe}] REJECTED - Fibo %{fibo_pct:.1f} (zone: %70-90)")
+            obs = filtered_obs
+            
+            # FVG filtreleme (detaylı log ile)
+            filtered_fvgs = []
+            for fvg in fvgs:
+                fvg_mid = fvg.get('mid', (fvg['high']+fvg['low'])/2)
+                if is_in_fvg_zone(fvg_mid, fibo_data):
+                    filtered_fvgs.append(fvg)
+                else:
+                    fibo_pct = ((fibo_data['pdc_high'] - fvg_mid) / (fibo_data['pdc_high'] - fibo_data['pdc_low'])) * 100 if fibo_data['pdc_high'] != fibo_data['pdc_low'] else 0
+                    logger.info(f"📐 {pair}: FVG {fvg['type']} [{timeframe}] REJECTED - Fibo %{fibo_pct:.1f} (zone: %60-90)")
+            fvgs = filtered_fvgs
+            
+            if obs_before > len(obs) or fvgs_before > len(fvgs):
+                logger.info(f"📐 {pair}: Fibo filtre: OB {obs_before}→{len(obs)}, FVG {fvgs_before}→{len(fvgs)}")
         
         logger.info(f"🔍 {pair}: TF={timeframe}, OB={len(obs)}, FVG={len(fvgs)}, Bias={bias}, Doji={doji_warning}")
         
@@ -104,6 +133,9 @@ def detect_trading_setup(pair, market_data):
                     result['reversal_mode'] = reversal_mode
                     logger.info(f"✅ {pair}: OB SHORT setup bulundu!")
                 return result
+            else:
+                # Bias mismatch
+                logger.info(f"⚠️ {pair}: OB BIAS MISMATCH - OB={ob['type']}, Bias={bias_str} → SKIP")
         
         # FVG Kontrol
         if len(fvgs) > 0:
@@ -123,6 +155,9 @@ def detect_trading_setup(pair, market_data):
                     result['reversal_mode'] = reversal_mode
                     logger.info(f"✅ {pair}: FVG SHORT setup bulundu!")
                 return result
+            else:
+                # Bias mismatch
+                logger.info(f"⚠️ {pair}: FVG BIAS MISMATCH - FVG={fvg['type']}, Bias={bias_str} → SKIP")
         
         logger.debug(f"ℹ️ {pair}: Setup bulunamadı (Bias uyumsuz veya OB/FVG yok)")
         return False
@@ -216,7 +251,7 @@ def scan_setups(pair, market_data):
             fibo_data = calculate_fibo_zones(pdc, bias)
             
             if doji_warning:
-                logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, Reversal={reversal_mode}")
+                logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, PDC_is_Doji={pdc_result['pdc_is_doji']}, Reversal={reversal_mode}")
         else:
             # Fallback: Eski yöntem
             pdc = market_data.get('previous_day', {})

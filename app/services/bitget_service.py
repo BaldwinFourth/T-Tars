@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.0
+T-TARS Bitget Service v2.4.1
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.1:
+- FIX: Hedge mode icin holdSide parametresi eklendi
+- FIX: "unilateral position" hatasi (40774) duzeltildi
 
 v2.4.0:
 - FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
@@ -113,7 +117,10 @@ class BitgetService:
                 'secret': self.secret_key,
                 'password': self.passphrase,
                 'enableRateLimit': True,
-                'options': {'defaultType': 'swap', 'defaultSubType': 'linear'}
+                'options': {
+                    'defaultType': 'swap',
+                    'defaultSubType': 'linear'
+                }
             }
             
             if config['apiKey'] and config['secret']:
@@ -597,9 +604,11 @@ class BitgetService:
             precision = self.get_price_precision(symbol)
             entry_rounded = round_price_to_precision(entry_price, precision)
             
-            # CCXT order params
+            # CCXT order params - Hedge mode
+            hold_side = 'long' if side.lower() == 'buy' else 'short'
             params = {
                 'marginMode': 'cross',
+                'holdSide': hold_side,  # v2.4.1: Hedge mode için zorunlu
             }
             
             # TP/SL preset

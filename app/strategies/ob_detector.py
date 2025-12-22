@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.3.11
+T-TARS OB Detector v2.4.0
 ==========================
 Order Block setup detection (Scanning + Validation)
 
+v2.4.0:
+- NEW: Minimum boyut filtresi (≥1.0 ATR)
+- NEW: En yakın 4 OB döndür (noise reduction)
+- NEW: current_price parametresi scan_order_blocks'a eklendi
+- CHANGED: Import'lara MIN_OB_SIZE_ATR eklendi
+
 v2.3.11:
 - CHANGED: calculate_setup_strength() 3 parametre (confidence kaldırıldı)
-- Bu sayede circular logic sorunu çözüldü
-
-v2.3.10:
-- FIX: Return dict'e volume_spike_ratio ve ob_strength eklendi
-
-v2.3.8:
-- CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
 
 Formül (Kadircan):
 LONG:  Entry = (OB_H + OB_L) / 2, Stop = Entry - ATR, TP1 = Entry + 2*ATR, TP2 = Entry + 4*ATR
@@ -26,17 +25,34 @@ from app.strategies.calculators import (
     MIN_RR_RATIO,
     TP1_MULTIPLIER,
     TP2_MULTIPLIER,
-    VOLUME_TRADEABLE_MIN
+    VOLUME_TRADEABLE_MIN,
+    MIN_OB_SIZE_ATR  # v2.4.0: Minimum OB boyutu
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_DISTANCE_PERCENT = 3.0
+MAX_OB_COUNT = 4  # v2.4.0: En fazla 4 OB döndür
 
 
-def scan_order_blocks(ohlcv, timeframe_str):
-    """Mum verilerini tarayarak potansiyel Order Block'ları bulur."""
+def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
+    """
+    Mum verilerini tarayarak potansiyel Order Block'ları bulur.
+    
+    v2.4.0:
+    - Boyut filtresi: OB boyutu >= 1.0 ATR olmalı
+    - En yakın 4: Fiyata en yakın 4 OB döndürülür
+    
+    Args:
+        ohlcv: Mum verileri [[ts, o, h, l, c, v], ...]
+        timeframe_str: Timeframe string (örn: '1h')
+        atr: ATR değeri (boyut filtresi için)
+        current_price: Güncel fiyat (sıralama için)
+    
+    Returns:
+        list: En yakın 4 OB (boyut filtresinden geçenler)
+    """
     obs = []
     try:
         if len(ohlcv) < 5:
@@ -50,30 +66,61 @@ def scan_order_blocks(ohlcv, timeframe_str):
             curr = lookback_data[i]
             next_candle = lookback_data[i+1]
             
+            # Bullish OB: Kırmızı mum + sonraki mum yukarı kırılım
             if curr[4] < curr[1]:  # Kırmızı
                 if next_candle[4] > curr[2]:
+                    ob_high = curr[2]
+                    ob_low = curr[3]
+                    ob_size = ob_high - ob_low
+                    ob_mid = (ob_high + ob_low) / 2
+                    
+                    # v2.4.0: Boyut filtresi
+                    if atr > 0 and ob_size < (atr * MIN_OB_SIZE_ATR):
+                        logger.debug(f"OB Scan [{timeframe_str}]: Bullish OB rejected (size={ob_size:.4f} < {atr * MIN_OB_SIZE_ATR:.4f})")
+                        continue
+                    
                     obs.append({
                         'type': 'bullish',
-                        'high': curr[2],
-                        'low': curr[3],
+                        'high': ob_high,
+                        'low': ob_low,
+                        'mid': ob_mid,
+                        'size': ob_size,
                         'strength': 'high',
                         'volume_confirmed': True
                     })
 
+            # Bearish OB: Yeşil mum + sonraki mum aşağı kırılım
             elif curr[4] > curr[1]:  # Yeşil
                 if next_candle[4] < curr[3]:
+                    ob_high = curr[2]
+                    ob_low = curr[3]
+                    ob_size = ob_high - ob_low
+                    ob_mid = (ob_high + ob_low) / 2
+                    
+                    # v2.4.0: Boyut filtresi
+                    if atr > 0 and ob_size < (atr * MIN_OB_SIZE_ATR):
+                        logger.debug(f"OB Scan [{timeframe_str}]: Bearish OB rejected (size={ob_size:.4f} < {atr * MIN_OB_SIZE_ATR:.4f})")
+                        continue
+                    
                     obs.append({
                         'type': 'bearish',
-                        'high': curr[2],
-                        'low': curr[3],
+                        'high': ob_high,
+                        'low': ob_low,
+                        'mid': ob_mid,
+                        'size': ob_size,
                         'strength': 'high',
                         'volume_confirmed': True
                     })
         
-        if obs:
+        # v2.4.0: Fiyata en yakın 4 OB'yi seç
+        if current_price > 0 and len(obs) > MAX_OB_COUNT:
+            obs = sorted(obs, key=lambda x: abs(x['mid'] - current_price))[:MAX_OB_COUNT]
+            logger.debug(f"📦 OB Scan [{timeframe_str}]: {len(obs)} OB (filtered to closest {MAX_OB_COUNT})")
+        elif obs:
+            obs = obs[-MAX_OB_COUNT:]  # Son 4'ü al
             logger.debug(f"📦 OB Scan [{timeframe_str}]: {len(obs)} OB bulundu")
         
-        return obs[-5:]
+        return obs
         
     except Exception as e:
         logger.error(f"❌ OB Scan Error [{timeframe_str}]: {e}")

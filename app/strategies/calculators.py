@@ -1,31 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.3.11
+T-TARS Trading Calculators v2.4.0
 ===================================
+v2.4.0:
+- NEW: calculate_pdc_bias() - PDC bazlı bias + Doji kontrolü
+- NEW: calculate_fibo_zones() - Fibo %60-90 ve %70-90 zone hesabı
+- NEW: is_in_ob_zone() - OB için %70-90 kontrolü
+- NEW: is_in_fvg_zone() - FVG için %60-90 kontrolü
+- NEW: check_doji() - Tek mum doji kontrolü
+- NEW: MIN_OB_SIZE_ATR = 1.0, MIN_FVG_SIZE_ATR = 1.0
+- MOVED: PDC ve Fibo hesaplamaları bitget_service'den buraya taşındı
+
 v2.3.11:
 - CHANGED: calculate_setup_strength() 4 parametre → 3 parametre
 - REMOVED: confidence parametresi (circular logic fix)
 - NEW: Volume VETO - düşük volume = max LOW confidence garantisi
-- CHANGED: Weight'ler: Volume %40, OB/FVG %40, R:R %20
-
-v2.3.8:
-- DRY prensibi: Score'lar constant olarak tanımlandı
-- VOLUME_TRADEABLE_MIN eklendi (volume_analyzer ve claude_service import edecek)
-
-Kullanım:
-    from app.strategies.calculators import (
-        calculate_setup_strength,
-        calculate_rr,
-        format_price,
-        MIN_RR_RATIO,
-        STOP_MULTIPLIER,
-        TP1_MULTIPLIER,
-        TP2_MULTIPLIER,
-        VOLUME_TRADEABLE_MIN,
-        VOLUME_LOW,
-        VOLUME_GOOD,
-        VOLUME_EXCELLENT
-    )
 """
 
 # ============================================
@@ -95,15 +84,33 @@ DEFAULT_STRENGTH_SCORE = 0.25   # Bilinmeyen strength için
 
 # ============================================
 # WEIGHT DISTRIBUTION (Fine tuning buradan)
-# v2.3.11: Confidence kaldırıldı (circular logic fix)
 # ============================================
 WEIGHT_VOLUME = 0.40       # Volume ağırlığı - EN KRİTİK
 WEIGHT_STRENGTH = 0.40     # OB/FVG gücü ağırlığı
-WEIGHT_RR = 0.20           # Risk:Reward ağırlığı (genelde sabit 2.0)
+WEIGHT_RR = 0.20           # Risk:Reward ağırlığı
 # Toplam = 1.0
 
 # Volume Veto Threshold
 VOLUME_VETO_MAX_SCORE = 0.45  # Volume < VOLUME_LOW ise max bu score
+
+# ============================================
+# v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
+# ============================================
+MIN_OB_SIZE_ATR = 1.0      # OB en az 1.0 ATR olmalı
+MIN_FVG_SIZE_ATR = 1.0     # FVG en az 1.0 ATR olmalı
+
+# ============================================
+# v2.4.0: FİBO ZONE TANIMLARI
+# ============================================
+OB_ZONE_MIN = 0.70         # OB arama: %70-90
+OB_ZONE_MAX = 0.90
+FVG_ZONE_MIN = 0.60        # FVG arama: %60-90
+FVG_ZONE_MAX = 0.90
+
+# ============================================
+# v2.4.0: DOJİ THRESHOLD
+# ============================================
+DOJI_BODY_THRESHOLD = 0.10  # Body < range'in %10'u ise doji
 
 
 # ============================================
@@ -111,11 +118,7 @@ VOLUME_VETO_MAX_SCORE = 0.45  # Volume < VOLUME_LOW ise max bu score
 # ============================================
 
 def format_price(price):
-    """
-    Fiyatı dinamik formatta string'e çevir.
-    SHIB/DOGE gibi düşük fiyatlı coinler için 8 ondalık,
-    BTC gibi yüksek fiyatlılar için 2 ondalık kullanır.
-    """
+    """Fiyatı dinamik formatta string'e çevir."""
     if price is None or price == 0:
         return "$0.00"
     
@@ -134,17 +137,13 @@ def format_price(price):
 
 
 def format_price_raw(price):
-    """
-    Fiyatı $ olmadan formatla (log için)
-    """
+    """Fiyatı $ olmadan formatla (log için)"""
     formatted = format_price(price)
     return formatted.replace("$", "")
 
 
 def calculate_rr(entry_price, stop_price, tp_price):
-    """
-    Risk:Reward oranını hesapla.
-    """
+    """Risk:Reward oranını hesapla."""
     risk = abs(entry_price - stop_price)
     reward = abs(tp_price - entry_price)
     
@@ -155,10 +154,7 @@ def calculate_rr(entry_price, stop_price, tp_price):
 
 
 def get_volume_score(volume_ratio):
-    """
-    Volume spike oranına göre score döndür.
-    Fine tuning: Dosya başındaki SCORE_VOLUME_* constant'larını değiştir.
-    """
+    """Volume spike oranına göre score döndür."""
     if volume_ratio >= VOLUME_EXCELLENT:
         return SCORE_VOLUME_EXCELLENT
     elif volume_ratio >= VOLUME_GOOD:
@@ -172,10 +168,7 @@ def get_volume_score(volume_ratio):
 
 
 def get_rr_score(rr_ratio):
-    """
-    Risk:Reward oranına göre score döndür.
-    Fine tuning: Dosya başındaki SCORE_RR_* constant'larını değiştir.
-    """
+    """Risk:Reward oranına göre score döndür."""
     if rr_ratio >= RR_EXCELLENT:
         return SCORE_RR_EXCELLENT
     elif rr_ratio >= RR_GOOD:
@@ -189,22 +182,7 @@ def get_rr_score(rr_ratio):
 
 
 def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio):
-    """
-    Setup gücünü hesapla (0-1 arası, bonus ile 1.0'ı aşabilir).
-    
-    v2.3.11 DEĞİŞİKLİKLER:
-    - confidence parametresi KALDIRILDI (circular logic fix)
-    - Volume VETO eklendi: Volume < 0.8 → max 0.45 score (LOW garantisi)
-    - Weight'ler: Volume %40, OB/FVG %40, R:R %20
-    
-    Args:
-        volume_spike_ratio: Volume spike oranı (0.0 - 5.0+)
-        ob_or_fvg_strength: 'high', 'medium', 'low'
-        rr_ratio: Risk:Reward oranı (2.0+)
-    
-    Returns:
-        float: Setup strength score (0.0 - 1.2)
-    """
+    """Setup gücünü hesapla (0-1 arası, bonus ile 1.0'ı aşabilir)."""
     # Volume Score
     volume_score = get_volume_score(volume_spike_ratio)
     
@@ -221,9 +199,7 @@ def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio):
         rr_score * WEIGHT_RR
     )
     
-    # 🚨 VOLUME VETO: Düşük volume = maximum LOW confidence
-    # Volume < 0.8 ise, diğer faktörler ne kadar iyi olursa olsun
-    # score max 0.45'te kalır → _get_confidence_label() = LOW
+    # Volume VETO
     if volume_spike_ratio < VOLUME_LOW:
         overall_strength = min(overall_strength, VOLUME_VETO_MAX_SCORE)
     
@@ -231,7 +207,227 @@ def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio):
 
 
 def is_valid_setup(rr_ratio):
-    """
-    R:R minimum gerekliliği karşılıyor mu?
-    """
+    """R:R minimum gerekliliği karşılıyor mu?"""
     return rr_ratio >= MIN_RR_RATIO
+
+
+# ============================================
+# v2.4.0: PDC & BIAS FONKSİYONLARI
+# ============================================
+
+def check_doji(candle):
+    """
+    Tek mumun doji olup olmadığını kontrol et.
+    
+    Args:
+        candle: [timestamp, open, high, low, close, volume]
+    
+    Returns:
+        bool: Doji ise True
+    """
+    if len(candle) < 5:
+        return False
+    
+    o, h, l, c = candle[1], candle[2], candle[3], candle[4]
+    body = abs(c - o)
+    range_ = h - l
+    
+    if range_ == 0:
+        return True  # Hiç hareket yok = doji
+    
+    return body < (range_ * DOJI_BODY_THRESHOLD)
+
+
+def calculate_pdc_bias(daily_ohlcv):
+    """
+    PDC'ye göre bias belirle + Doji kontrolü.
+    
+    Args:
+        daily_ohlcv: Son 5+ daily mum [[ts, o, h, l, c, v], ...]
+    
+    Returns:
+        {
+            'bias': 'LONG' | 'SHORT',
+            'pdc': {'open', 'high', 'low', 'close', 'type'},
+            'doji_warning': bool,
+            'doji_count': int,
+            'pdc_is_doji': bool,
+            'reversal_mode': bool
+        }
+    """
+    if not daily_ohlcv or len(daily_ohlcv) < 5:
+        return {
+            'bias': 'LONG',
+            'pdc': {'open': 0, 'high': 0, 'low': 0, 'close': 0, 'type': 'green'},
+            'doji_warning': False,
+            'doji_count': 0,
+            'pdc_is_doji': False,
+            'reversal_mode': False
+        }
+    
+    # Son 5 mum al
+    last_5 = daily_ohlcv[-5:]
+    
+    # PDC = dünkü kapanmış mum (bugün hariç)
+    pdc = last_5[-2]
+    pdc_open, pdc_high, pdc_low, pdc_close = pdc[1], pdc[2], pdc[3], pdc[4]
+    pdc_type = 'green' if pdc_close > pdc_open else 'red'
+    
+    # Doji kontrolü - son 4 KAPANMIŞ mum (bugün hariç)
+    closed_candles = last_5[:-1]  # [-5, -4, -3, -2] indisleri
+    doji_count = 0
+    pdc_is_doji = False
+    
+    for candle in closed_candles:
+        if check_doji(candle):
+            doji_count += 1
+            if candle == pdc:
+                pdc_is_doji = True
+    
+    # Bias belirleme
+    if pdc_is_doji:
+        # PDC doji ise, ondan önceki muma bak ve TERSİNİ al
+        prev_candle = last_5[-3]
+        prev_type = 'green' if prev_candle[4] > prev_candle[1] else 'red'
+        bias = 'SHORT' if prev_type == 'green' else 'LONG'
+        reversal_mode = True
+    elif doji_count >= 2:
+        # 2+ doji varsa reversal modu
+        bias = 'SHORT' if pdc_type == 'green' else 'LONG'
+        reversal_mode = True
+    else:
+        # Normal mod
+        bias = 'LONG' if pdc_type == 'green' else 'SHORT'
+        reversal_mode = False
+    
+    return {
+        'bias': bias,
+        'pdc': {
+            'open': pdc_open,
+            'high': pdc_high,
+            'low': pdc_low,
+            'close': pdc_close,
+            'type': pdc_type
+        },
+        'doji_warning': doji_count > 0,
+        'doji_count': doji_count,
+        'pdc_is_doji': pdc_is_doji,
+        'reversal_mode': reversal_mode
+    }
+
+
+# ============================================
+# v2.4.0: FİBO ZONE FONKSİYONLARI
+# ============================================
+
+def calculate_fibo_zones(pdc, bias):
+    """
+    PDC ve bias'a göre Fibo zone'larını hesapla.
+    
+    Args:
+        pdc: {'open', 'high', 'low', 'close', 'type'}
+        bias: 'LONG' | 'SHORT'
+    
+    Returns:
+        {
+            'fib_0': float,      # 0% seviyesi
+            'fib_100': float,    # 100% seviyesi
+            'ob_zone': (low, high),   # OB arama bölgesi (%70-90)
+            'fvg_zone': (low, high),  # FVG arama bölgesi (%60-90)
+            'fib_levels': {...}  # Tüm fibo seviyeleri
+        }
+    """
+    high = pdc['high']
+    low = pdc['low']
+    diff = high - low
+    
+    if diff == 0:
+        return {
+            'fib_0': low,
+            'fib_100': high,
+            'ob_zone': (low, high),
+            'fvg_zone': (low, high),
+            'fib_levels': {}
+        }
+    
+    # Fibo yönü bias'a göre
+    if bias == 'LONG':
+        # Yeşil PDC: 0 altta, 100 üstte
+        fib_0 = low
+        fib_100 = high
+    else:
+        # Kırmızı PDC: 0 üstte, 100 altta (ters çevrilmiş)
+        fib_0 = high
+        fib_100 = low
+    
+    # Fibo seviyeleri hesapla
+    def calc_level(pct):
+        if bias == 'LONG':
+            return low + (diff * pct)
+        else:
+            return high - (diff * pct)
+    
+    fib_levels = {
+        '0': calc_level(0),
+        '23.6': calc_level(0.236),
+        '38.2': calc_level(0.382),
+        '50': calc_level(0.5),
+        '60': calc_level(0.6),
+        '61.8': calc_level(0.618),
+        '70': calc_level(0.7),
+        '78.6': calc_level(0.786),
+        '90': calc_level(0.9),
+        '100': calc_level(1.0)
+    }
+    
+    # OB Zone: %70-90
+    ob_low = min(fib_levels['70'], fib_levels['90'])
+    ob_high = max(fib_levels['70'], fib_levels['90'])
+    
+    # FVG Zone: %60-90
+    fvg_low = min(fib_levels['60'], fib_levels['90'])
+    fvg_high = max(fib_levels['60'], fib_levels['90'])
+    
+    return {
+        'fib_0': fib_0,
+        'fib_100': fib_100,
+        'ob_zone': (ob_low, ob_high),
+        'fvg_zone': (fvg_low, fvg_high),
+        'fib_levels': fib_levels
+    }
+
+
+def is_in_ob_zone(price, fibo_data):
+    """
+    Fiyatın OB zone'unda (%70-90) olup olmadığını kontrol et.
+    
+    Args:
+        price: Kontrol edilecek fiyat (OB mid-point)
+        fibo_data: calculate_fibo_zones() çıktısı
+    
+    Returns:
+        bool
+    """
+    if not fibo_data or 'ob_zone' not in fibo_data:
+        return True  # Fibo yoksa filtre uygulama
+    
+    zone_low, zone_high = fibo_data['ob_zone']
+    return zone_low <= price <= zone_high
+
+
+def is_in_fvg_zone(price, fibo_data):
+    """
+    Fiyatın FVG zone'unda (%60-90) olup olmadığını kontrol et.
+    
+    Args:
+        price: Kontrol edilecek fiyat (FVG mid-point)
+        fibo_data: calculate_fibo_zones() çıktısı
+    
+    Returns:
+        bool
+    """
+    if not fibo_data or 'fvg_zone' not in fibo_data:
+        return True  # Fibo yoksa filtre uygulama
+    
+    zone_low, zone_high = fibo_data['fvg_zone']
+    return zone_low <= price <= zone_high

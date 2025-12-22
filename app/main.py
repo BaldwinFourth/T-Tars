@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.3.14
+T-TARS Trading Bot v2.4.0
 ==========================
 Main Flask application with routes.
+
+v2.4.0:
+- UPGRADED: Strateji yeniden yapilandirildi (PDC bias, Fibo zone, Doji, OB/FVG noise filter)
+- Detaylar icin CHANGELOG.md
 
 v2.3.14:
 - NEW: Duplicate order kontrolü (tracking.check_duplicate_setup)

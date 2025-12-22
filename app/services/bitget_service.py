@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.3.14
+T-TARS Bitget Service v2.4.0
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
+- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
 
 v2.3.14:
 - NEW: place_copy_trade_order() - Copy Trade API ile order aç
@@ -416,6 +422,11 @@ class BitgetService:
             pdc = self.get_previous_day_candle(symbol)
             fibo = self.calculate_fibonacci(symbol)
             
+            # v2.4.0: Daily OHLCV (PDC bias + Doji kontrolu icin)
+            daily_ohlcv = self.get_ohlcv(symbol, '1d', 10)
+            if not daily_ohlcv:
+                daily_ohlcv = []
+            
             atr_data, volume_data, order_blocks, fair_value_gaps = {}, {}, {}, {}
             cache_hits, cache_misses = 0, 0
             
@@ -469,8 +480,10 @@ class BitgetService:
                             'trend': 'unknown', 'source': 'no_cache'
                         }
                     
-                    order_blocks[api_tf] = scan_order_blocks(ohlcv, api_tf)
-                    fair_value_gaps[api_tf] = scan_fair_value_gaps(ohlcv, api_tf)
+                    # v2.4.0: scan fonksiyonlarina atr ve current_price eklendi
+                    tf_atr = atr_data.get(api_tf, 0)
+                    order_blocks[api_tf] = scan_order_blocks(ohlcv, api_tf, atr=tf_atr, current_price=current_price)
+                    fair_value_gaps[api_tf] = scan_fair_value_gaps(ohlcv, api_tf, atr=tf_atr, current_price=current_price)
                 except Exception as e:
                     api_tf = self.TIMEFRAME_MAP.get(tf, tf)
                     logger.error(f"❌ {coin_name} {api_tf} error: {e}")
@@ -487,6 +500,7 @@ class BitgetService:
                 'current_date': now.strftime('%Y-%m-%d'),
                 'current_time': now.strftime('%H:%M:%S'),
                 'previous_day': pdc,
+                'daily_ohlcv': daily_ohlcv,  # v2.4.0: PDC bias + Doji icin
                 'fibonacci': fibo,
                 'atr': atr_data,
                 'volume': volume_data,
@@ -553,77 +567,89 @@ class BitgetService:
 
     def place_copy_trade_order(self, symbol, side, contracts, entry_price, tp_price=None, sl_price=None):
         """
-        v2.3.14: Copy Trade API ile order aç
+        v2.4.0: Normal CCXT create_order + sonradan trackingNo sorgula
         
-        Endpoint: POST /api/v2/copy/mix-trader/order-open-position
+        Elite Trader Copy Trade API key ile normal order acilinca,
+        Bitget otomatik olarak takipcilere kopyalar.
+        trackingNo sonradan find_tracking_no_by_symbol ile alinir.
         
         Args:
-            symbol: Trading pair (BTC/USDT:USDT veya BTCUSDT)
+            symbol: Trading pair (BTC/USDT:USDT)
             side: 'buy' (LONG) veya 'sell' (SHORT)
-            contracts: Kontrat sayısı
-            entry_price: Limit order fiyatı
-            tp_price: Take profit fiyatı (opsiyonel)
-            sl_price: Stop loss fiyatı (opsiyonel)
+            contracts: Kontrat sayisi
+            entry_price: Limit order fiyati
+            tp_price: Take profit fiyati (opsiyonel)
+            sl_price: Stop loss fiyati (opsiyonel)
         
         Returns:
             dict: {
                 'success': True/False,
-                'tracking_no': str,  # Copy Trade trackingNo
+                'tracking_no': str,
                 'order_id': str,
                 ...
             }
         """
         self._require_auth()
         try:
-            # Symbol format: BTCUSDT (Copy Trade API formatı)
-            bitget_symbol = self._get_bitget_symbol(symbol)
-            coin_name = symbol.replace('/USDT:USDT', '').replace('USDT', '')
-            
-            # Side: open_long veya open_short
-            ct_side = 'open_long' if side.lower() == 'buy' else 'open_short'
+            symbol = self._normalize_symbol(symbol)
+            coin_name = symbol.replace('/USDT:USDT', '')
             
             precision = self.get_price_precision(symbol)
             entry_rounded = round_price_to_precision(entry_price, precision)
             
-            body = {
-                'productType': 'USDT-FUTURES',
-                'symbol': bitget_symbol,
+            # CCXT order params
+            params = {
                 'marginMode': 'cross',
-                'marginCoin': 'USDT',
-                'side': ct_side,
-                'orderType': 'limit',
-                'price': str(entry_rounded),
-                'size': str(contracts),
             }
             
-            # TP/SL ekle
+            # TP/SL preset
             if tp_price and tp_price > 0:
                 tp_rounded = round_price_to_precision(tp_price, precision)
-                body['stopSurplusPrice'] = str(tp_rounded)
+                params['stopSurplus'] = {
+                    'triggerPrice': tp_rounded,
+                    'price': tp_rounded,
+                    'type': 'fill_price'
+                }
             
             if sl_price and sl_price > 0:
                 sl_rounded = round_price_to_precision(sl_price, precision)
-                body['stopLossPrice'] = str(sl_rounded)
+                params['stopLoss'] = {
+                    'triggerPrice': sl_rounded,
+                    'price': sl_rounded,
+                    'type': 'fill_price'
+                }
             
-            logger.info(f"🚀 Copy Trade Order: {coin_name} {ct_side.upper()}")
+            logger.info(f"Order Aciliyor (CCXT): {coin_name} {side.upper()}")
             logger.info(f"   Entry: {format_price_display(entry_rounded)} | Contracts: {contracts}")
             if tp_price:
                 logger.info(f"   TP: {format_price_display(tp_price)} | SL: {format_price_display(sl_price)}")
             
-            response = self._copy_trade_request(
-                'POST',
-                '/api/v2/copy/mix-trader/order-open-position',
-                body=body
+            # CCXT create_order (limit order)
+            order = self.exchange.create_order(
+                symbol=symbol,
+                type='limit',
+                side=side.lower(),
+                amount=contracts,
+                price=entry_rounded,
+                params=params
             )
             
-            if response and response.get('code') == '00000':
-                data = response.get('data', {})
-                tracking_no = data.get('trackingNo')
-                order_id = data.get('orderId', tracking_no)  # orderId yoksa trackingNo kullan
+            if order and order.get('id'):
+                order_id = order.get('id')
+                logger.info(f"Order Basarili! orderId: {order_id}")
                 
-                logger.info(f"✅ Copy Trade Order Başarılı!")
-                logger.info(f"   trackingNo: {tracking_no}")
-                logger.info(f"   orderId: {order_id}")
+                # trackingNo'yu bul (Copy Trade icin)
+                tracking_no = None
+                try:
+                    import time
+                    time.sleep(1)  # API'nin islemesi icin kisa bekle
+                    tracking_no = self.find_tracking_no_by_symbol(symbol)
+                    if tracking_no:
+                        logger.info(f"   trackingNo: {tracking_no}")
+                    else:
+                        logger.warning(f"   trackingNo bulunamadi (normal hesap olabilir)")
+                except Exception as te:
+                    logger.warning(f"   trackingNo sorgu hatasi: {te}")
                 
                 return {
                     'success': True,
@@ -633,26 +659,27 @@ class BitgetService:
                     'entry_price': entry_rounded,
                     'tp_price': tp_price,
                     'sl_price': sl_price,
-                    'response': data
+                    'response': order
                 }
             else:
-                error_msg = response.get('msg', 'Unknown error') if response else 'No response'
-                error_code = response.get('code', 'N/A') if response else 'N/A'
-                logger.error(f"❌ Copy Trade Order Hatası: [{error_code}] {error_msg}")
-                
+                logger.error(f"Order Hatasi: Bos yanit")
                 return {
                     'success': False,
-                    'error': f"[{error_code}] {error_msg}",
-                    'response': response
+                    'error': 'Order response empty',
+                    'response': order
                 }
                 
         except Exception as e:
-            logger.error(f"❌ Copy Trade Order Exception: {e}")
+            logger.error(f"Order Exception: {e}")
             return {'success': False, 'error': str(e)}
 
     def place_order_with_tp_sl(self, symbol, side, entry_price, stop_price, tp_price=None):
         """
-        v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
+        v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+
+v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
         
         Eski CCXT versiyonu yerine Copy Trade API kullanır.
         """
@@ -706,7 +733,11 @@ class BitgetService:
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': result.get('tracking_no'),  # v2.3.14: trackingNo eklendi
+                    'tracking_no': result.get('tracking_no'),  # v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+
+v2.3.14: trackingNo eklendi
                     'contracts': contracts,
                     'entry_price': entry_price,
                     'margin_usd': actual_margin,
@@ -878,7 +909,11 @@ class BitgetService:
 
     def execute_trade_for_setup(self, setup_data, claude_decision=None):
         """
-        v2.3.14: Unified Trade Execution - Copy Trade API ile
+        v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+
+v2.3.14: Unified Trade Execution - Copy Trade API ile
         tracking_no döndürür
         """
         try:
@@ -924,7 +959,11 @@ class BitgetService:
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': tracking_no,  # v2.3.14: trackingNo eklendi
+                    'tracking_no': tracking_no,  # v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+
+v2.3.14: trackingNo eklendi
                     'contracts': result.get('contracts', 0),
                     'margin_usd': result.get('margin_usd', 0),
                     'position_usd': result.get('position_usd', 0),

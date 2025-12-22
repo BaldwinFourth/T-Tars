@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.3.11
+T-TARS FVG Detector v2.4.0
 ===========================
 Fair Value Gap setup detection (Scanning + Validation)
 
+v2.4.0:
+- NEW: Minimum boyut filtresi (≥1.0 ATR)
+- NEW: En yakın 4 FVG döndür (noise reduction)
+- NEW: current_price ve atr parametresi scan_fair_value_gaps'a eklendi
+- CHANGED: Import'lara MIN_FVG_SIZE_ATR eklendi
+
 v2.3.11:
 - CHANGED: calculate_setup_strength() 3 parametre (confidence kaldırıldı)
-- Bu sayede circular logic sorunu çözüldü
-
-v2.3.10:
-- FIX: Return dict'e volume_spike_ratio ve fvg_strength eklendi
-
-v2.3.8:
-- CHANGED: VOLUME_THRESHOLD kaldırıldı → calculators.VOLUME_TRADEABLE_MIN (DRY)
 
 Formül (Kadircan):
 Gap Size = Gap High - Gap Low
@@ -28,17 +27,34 @@ from app.strategies.calculators import (
     MIN_RR_RATIO,
     TP1_MULTIPLIER,
     TP2_MULTIPLIER,
-    VOLUME_TRADEABLE_MIN
+    VOLUME_TRADEABLE_MIN,
+    MIN_FVG_SIZE_ATR  # v2.4.0: Minimum FVG boyutu
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_DISTANCE_PERCENT = 3.0
+MAX_FVG_COUNT = 4  # v2.4.0: En fazla 4 FVG döndür
 
 
-def scan_fair_value_gaps(ohlcv, timeframe_str):
-    """Mum verilerini tarayarak potansiyel FVG'leri bulur."""
+def scan_fair_value_gaps(ohlcv, timeframe_str, atr=0, current_price=0):
+    """
+    Mum verilerini tarayarak potansiyel FVG'leri bulur.
+    
+    v2.4.0:
+    - Boyut filtresi: FVG gap boyutu >= 1.0 ATR olmalı
+    - En yakın 4: Fiyata en yakın 4 FVG döndürülür
+    
+    Args:
+        ohlcv: Mum verileri [[ts, o, h, l, c, v], ...]
+        timeframe_str: Timeframe string (örn: '1h')
+        atr: ATR değeri (boyut filtresi için)
+        current_price: Güncel fiyat (sıralama için)
+    
+    Returns:
+        list: En yakın 4 FVG (boyut filtresinden geçenler)
+    """
     fvgs = []
     try:
         if len(ohlcv) < 5:
@@ -52,38 +68,59 @@ def scan_fair_value_gaps(ohlcv, timeframe_str):
             curr = lookback_data[i]
             next_candle = lookback_data[i+1]
             
+            # Bullish FVG: Sonraki mumun low'u > önceki mumun high'ı
             if next_candle[3] > prev[2]:
                 gap_low = prev[2]
                 gap_high = next_candle[3]
                 gap_size = gap_high - gap_low
+                gap_mid = (gap_high + gap_low) / 2
+                
+                # v2.4.0: Boyut filtresi
+                if atr > 0 and gap_size < (atr * MIN_FVG_SIZE_ATR):
+                    logger.debug(f"FVG Scan [{timeframe_str}]: Bullish FVG rejected (size={gap_size:.4f} < {atr * MIN_FVG_SIZE_ATR:.4f})")
+                    continue
                 
                 if gap_size > 0:
                     fvgs.append({
                         'type': 'bullish',
                         'high': gap_high,
                         'low': gap_low,
+                        'mid': gap_mid,
                         'gap_size': gap_size,
                         'strength': 'high' if gap_size > (curr[2] - curr[3]) * 0.5 else 'medium'
                     })
             
+            # Bearish FVG: Sonraki mumun high'ı < önceki mumun low'u
             if next_candle[2] < prev[3]:
                 gap_high = prev[3]
                 gap_low = next_candle[2]
                 gap_size = gap_high - gap_low
+                gap_mid = (gap_high + gap_low) / 2
+                
+                # v2.4.0: Boyut filtresi
+                if atr > 0 and gap_size < (atr * MIN_FVG_SIZE_ATR):
+                    logger.debug(f"FVG Scan [{timeframe_str}]: Bearish FVG rejected (size={gap_size:.4f} < {atr * MIN_FVG_SIZE_ATR:.4f})")
+                    continue
                 
                 if gap_size > 0:
                     fvgs.append({
                         'type': 'bearish',
                         'high': gap_high,
                         'low': gap_low,
+                        'mid': gap_mid,
                         'gap_size': gap_size,
                         'strength': 'high' if gap_size > (curr[2] - curr[3]) * 0.5 else 'medium'
                     })
         
-        if fvgs:
+        # v2.4.0: Fiyata en yakın 4 FVG'yi seç
+        if current_price > 0 and len(fvgs) > MAX_FVG_COUNT:
+            fvgs = sorted(fvgs, key=lambda x: abs(x['mid'] - current_price))[:MAX_FVG_COUNT]
+            logger.debug(f"📊 FVG Scan [{timeframe_str}]: {len(fvgs)} FVG (filtered to closest {MAX_FVG_COUNT})")
+        elif fvgs:
+            fvgs = fvgs[-MAX_FVG_COUNT:]  # Son 4'ü al
             logger.debug(f"📊 FVG Scan [{timeframe_str}]: {len(fvgs)} FVG bulundu")
         
-        return fvgs[-5:]
+        return fvgs
         
     except Exception as e:
         logger.error(f"❌ FVG Scan Error [{timeframe_str}]: {e}")

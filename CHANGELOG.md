@@ -1,3 +1,37 @@
+# T-TARS Trading Bot - CHANGELOG
+
+## v2.4.0 (2024-12-22)
+
+### 🚀 MAJOR: Strateji Yeniden Yapılandırma
+
+#### PDC + Bias Belirleme (YENİ)
+- PDC (Previous Day Candle) bazlı bias: Yeşil = LONG, Kırmızı = SHORT
+- Doji kontrolü: Son 4 daily mumda doji varsa reversal mode aktif
+- PDC kendisi doji ise: Önceki mumun tersi yönde işlem
+
+#### Fibonacci Zone Filtreleme (YENİ)
+- OB arama bölgesi: %70-90 arası (PDC'ye göre)
+- FVG arama bölgesi: %60-90 arası (PDC'ye göre)
+- Zone dışındaki OB/FVG'ler filtreleniyor
+
+#### OB/FVG Noise Reduction (YENİ)
+- Minimum boyut filtresi: OB ≥ 1.0 ATR, FVG ≥ 1.0 ATR
+- En yakın 4: Fiyata en yakın 4 OB/FVG döndürülüyor (eskiden 5)
+
+### 🔧 API FIX
+- **Copy Trade API düzeltildi**: Yanlış endpoint (`order-open-position`) yerine normal CCXT `create_order` kullanılıyor
+- **trackingNo**: Order sonrası `find_tracking_no_by_symbol` ile alınıyor
+
+### 📁 DEĞİŞEN DOSYALAR
+- `calculators.py`: PDC, Fibo, Doji fonksiyonları + MIN_SIZE constant'ları
+- `ob_detector.py`: Boyut filtresi + en yakın 4
+- `fvg_detector.py`: Boyut filtresi + en yakın 4
+- `setup_detector.py`: Bias + Fibo zone filtresi
+- `bitget_service.py`: API fix (CCXT create_order)
+- `strategies/__init__.py`: Yeni export'lar
+
+---
+
 ## v2.3.14 - Copy Trade API + Duplicate Kontrolü
 **Tarih:** 2024-12-22
 

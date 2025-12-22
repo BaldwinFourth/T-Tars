@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.4.0
+T-TARS Trading Bot v2.4.3
 ==========================
 Main Flask application with routes.
+
+v2.4.3:
+- FIX: REPLACE handling duzeltildi (eski order cancel + yeni order)
+- FIX: Duplicate order sorunu cozuldu
+- CHANGED: UPDATE_NEEDED → REPLACE
 
 v2.4.0:
 - UPGRADED: Strateji yeniden yapilandirildi (PDC bias, Fibo zone, Doji, OB/FVG noise filter)
@@ -559,10 +564,24 @@ def auto_analyze():
                                 logger.info(f"⚠️ DUPLICATE: {coin_name} {direction} [{timeframe}] - Skipping")
                                 continue
                             
-                            if dup_check['status'] == 'UPDATE_NEEDED':
-                                logger.info(f"🔄 UPDATE_NEEDED: {coin_name} {direction} - {dup_check['reason']}")
-                                # TODO: Mevcut order'ı cancel edip yenisini açabilirsin
-                                # Şimdilik yeni order aç (eski expire olacak)
+                            if dup_check['status'] == 'REPLACE':
+                                existing = dup_check.get('existing_setup', {})
+                                old_order_id = existing.get('order_id')
+                                old_setup_id = existing.get('setup_id')
+                                
+                                logger.info(f"🔄 REPLACE: {coin_name} {direction} - {dup_check['reason']}")
+                                
+                                # Eski order'ı cancel et
+                                if old_order_id:
+                                    cancel_result = bitget.cancel_order(old_order_id, pair)
+                                    if cancel_result.get('success'):
+                                        logger.info(f"🗑️ Eski order cancelled: {old_order_id}")
+                                        # EXPIRED olarak işaretle
+                                        if old_setup_id:
+                                            tracking.mark_setup_expired(old_setup_id)
+                                    else:
+                                        logger.warning(f"⚠️ Cancel failed: {old_order_id} - {cancel_result.get('error')}")
+                                # Devam et → yeni order açılacak
                             
                             adjustments = decision.get('adjustments', {})
                             stop_price = adjustments.get('stop_price', setup.get('stop_price'))

@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v2.3.14
+T-TARS Tracking Service v2.4.3
 ===============================
 Setup Logging & Performance Analytics Service
 
+v2.4.3:
+- CHANGED: UPDATE_NEEDED → REPLACE (daha net isimlendirme)
+- Mantik: Eski order cancel edilir, yeni order acilir
+
+v2.4.1:
+- CHANGED: Log mesaji versiyonu guncellendi (v2.3.11 → v2.4.1)
+
 v2.3.14:
-- NEW: check_duplicate_setup() - Duplicate order kontrolü
-  - Aynı coin + direction için açık order var mı?
-  - Entry/TP/SL aynı mı kontrol et
-  - Returns: NEW, DUPLICATE, UPDATE_NEEDED
+- NEW: check_duplicate_setup() - Duplicate order kontrolu
+  - Ayni coin + direction icin acik order var mi?
+  - Entry/TP/SL ayni mi kontrol et
+  - Returns: NEW, DUPLICATE, REPLACE
 
 v2.3.11:
 - NEW: check_and_expire_orders() - TF bazlı otomatik expiry
@@ -96,7 +103,7 @@ class TrackingService:
         self.bucket_name = bucket_name
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        logger.info(f"✅ Tracking Service v2.3.11 initialized: {bucket_name}")
+        logger.info(f"✅ Tracking Service v2.4.3 initialized: {bucket_name}")
     
     def check_and_expire_orders(self, exchange):
         """
@@ -554,7 +561,7 @@ class TrackingService:
         
         Returns:
             dict: {
-                'status': 'NEW' | 'DUPLICATE' | 'UPDATE_NEEDED',
+                'status': 'NEW' | 'DUPLICATE' | 'REPLACE',
                 'existing_setup': {...} veya None,
                 'reason': str
             }
@@ -563,7 +570,7 @@ class TrackingService:
             1. Aynı coin + direction için PENDING order var mı?
             2. VAR → Entry/TP/SL aynı mı? (tolerans dahilinde)
                 - AYNI → DUPLICATE (skip)
-                - FARKLI → UPDATE_NEEDED (güncelle veya yeni kur)
+                - FARKLI → REPLACE (eski cancel + yeni kur)
             3. YOK → NEW (yeni order aç)
         """
         try:
@@ -630,7 +637,7 @@ class TrackingService:
                     'reason': f"Same Entry/TP/SL already exists (setup_id: {existing.get('setup_id')})"
                 }
             else:
-                # Fiyatlar farklı → UPDATE_NEEDED
+                # Fiyatlar farklı → REPLACE (eski cancel + yeni kur)
                 diff_info = []
                 if not entry_match:
                     diff_info.append(f"Entry: {format_price(existing_entry)}→{format_price(entry_price)}")
@@ -639,9 +646,9 @@ class TrackingService:
                 if not sl_match:
                     diff_info.append(f"SL: {format_price(existing_sl)}→{format_price(sl_price)}")
                 
-                logger.info(f"🔄 {clean_coin} {direction_upper}: UPDATE_NEEDED - {', '.join(diff_info)}")
+                logger.info(f"🔄 {clean_coin} {direction_upper}: REPLACE - {', '.join(diff_info)}")
                 return {
-                    'status': 'UPDATE_NEEDED',
+                    'status': 'REPLACE',
                     'existing_setup': existing,
                     'reason': f"Price difference detected: {', '.join(diff_info)}"
                 }

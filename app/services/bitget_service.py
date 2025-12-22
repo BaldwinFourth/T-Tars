@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.2
+T-TARS Bitget Service v2.4.3
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.3:
+- FIX: TP/SL preset parametreleri duzeltildi (Bitget API doc)
+- CHANGED: stopSurplus/stopLoss → presetStopSurplusPrice/presetStopLossPrice
 
 v2.4.2:
 - FIX: Hedge mode params duzeltildi (Bitget API doc'a gore)
@@ -98,7 +102,7 @@ def round_price_to_precision(price, precision):
 
 
 class BitgetService:
-    """Bitget Borsa Servisi - v2.4.2 (Hedge Mode + Copy Trade API)"""
+    """Bitget Borsa Servisi - v2.4.3 (Hedge Mode + Copy Trade API + TP/SL Fix)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d', '4S': '4h', '4h': '4h',
@@ -141,7 +145,7 @@ class BitgetService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"Bitget Servisi v2.4.2 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
+            logger.info(f"Bitget Servisi v2.4.3 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
                        f"Close:{Config.CLOSE_ORDER_TYPE} | Copy Trade API: Active")
 
         except Exception as e:
@@ -617,22 +621,14 @@ class BitgetService:
                 'tradeSide': 'open',  # v2.4.2: Hedge mode için zorunlu
             }
             
-            # TP/SL preset
+            # TP/SL preset (Bitget API doc: presetStopSurplusPrice, presetStopLossPrice)
             if tp_price and tp_price > 0:
                 tp_rounded = round_price_to_precision(tp_price, precision)
-                params['stopSurplus'] = {
-                    'triggerPrice': tp_rounded,
-                    'price': tp_rounded,
-                    'type': 'fill_price'
-                }
+                params['presetStopSurplusPrice'] = str(tp_rounded)
             
             if sl_price and sl_price > 0:
                 sl_rounded = round_price_to_precision(sl_price, precision)
-                params['stopLoss'] = {
-                    'triggerPrice': sl_rounded,
-                    'price': sl_rounded,
-                    'type': 'fill_price'
-                }
+                params['presetStopLossPrice'] = str(sl_rounded)
             
             logger.info(f"Order Aciliyor (CCXT): {coin_name} {side.upper()}")
             logger.info(f"   Entry: {format_price_display(entry_rounded)} | Contracts: {contracts}")

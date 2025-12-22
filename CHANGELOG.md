@@ -1,5 +1,27 @@
 # T-TARS Trading Bot - CHANGELOG
 
+## v2.4.3 (2025-12-22)
+
+### FIXED
+- **Duplicate Order Sorunu Cozuldu:** REPLACE handling duzeltildi
+  - Eski order cancel ediliyor
+  - Eski setup EXPIRED olarak isaretleniyor
+  - Yeni order aciliyor
+- **TP/SL Preset Fix:** Bitget API doc'a gore parametreler duzeltildi
+  - `stopSurplus/stopLoss` → `presetStopSurplusPrice/presetStopLossPrice`
+  - Artik TP ve SL order'a ekleniyor
+
+### CHANGED
+- `UPDATE_NEEDED` → `REPLACE` (daha net isimlendirme)
+- Mantik: Ayni coin+direction icin farkli fiyatli order varsa → eski cancel + yeni ac
+
+### FILES CHANGED
+- `main.py` - REPLACE handling eklendi
+- `bitget_service.py` - TP/SL preset format duzeltildi
+- `tracking_service.py` - UPDATE_NEEDED → REPLACE
+
+---
+
 ## v2.4.2 (2025-12-22)
 
 ### FIXED

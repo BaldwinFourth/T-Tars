@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.1
+T-TARS Bitget Service v2.4.2
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.2:
+- FIX: Hedge mode params duzeltildi (Bitget API doc'a gore)
+- CHANGED: holdSide kaldirildi, tradeSide='open'/'close' kullaniliyor
+- side=buy (LONG), side=sell (SHORT), tradeSide=open/close
 
 v2.4.1:
 - FIX: Hedge mode icin holdSide parametresi eklendi
@@ -93,7 +98,7 @@ def round_price_to_precision(price, precision):
 
 
 class BitgetService:
-    """Bitget Borsa Servisi - v2.3.14 (Copy Trade API + Limit Close)"""
+    """Bitget Borsa Servisi - v2.4.2 (Hedge Mode + Copy Trade API)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d', '4S': '4h', '4h': '4h',
@@ -136,7 +141,7 @@ class BitgetService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"Bitget Servisi v2.3.14 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
+            logger.info(f"Bitget Servisi v2.4.2 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
                        f"Close:{Config.CLOSE_ORDER_TYPE} | Copy Trade API: Active")
 
         except Exception as e:
@@ -604,11 +609,12 @@ class BitgetService:
             precision = self.get_price_precision(symbol)
             entry_rounded = round_price_to_precision(entry_price, precision)
             
-            # CCXT order params - Hedge mode
-            hold_side = 'long' if side.lower() == 'buy' else 'short'
+            # CCXT order params - Hedge mode (Bitget API doc)
+            # side=buy → LONG, side=sell → SHORT
+            # tradeSide=open → pozisyon aç (hedge mode'da zorunlu)
             params = {
                 'marginMode': 'cross',
-                'holdSide': hold_side,  # v2.4.1: Hedge mode için zorunlu
+                'tradeSide': 'open',  # v2.4.2: Hedge mode için zorunlu
             }
             
             # TP/SL preset
@@ -815,8 +821,7 @@ class BitgetService:
             
             params = {
                 'marginMode': 'cross',
-                'holdSide': target_pos['side'],
-                'tradeSide': 'close',
+                'tradeSide': 'close',  # v2.4.2: Hedge mode için zorunlu
                 'reduceOnly': True
             }
             

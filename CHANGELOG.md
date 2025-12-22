@@ -1,5 +1,22 @@
 # T-TARS Trading Bot - CHANGELOG
 
+## v2.4.2 (2025-12-22)
+
+### FIXED
+- **Hedge Mode Order Fix:** Bitget API dokümantasyonuna göre params düzeltildi
+- `holdSide` kaldırıldı (native API'de yok)
+- `tradeSide='open'` eklendi (pozisyon açmak için)
+- `tradeSide='close'` (pozisyon kapatmak için)
+- **40774 Hatası Çözüldü:** "unilateral position" hatası
+
+### CHANGED
+- Hedge mode parametreleri: side=buy/sell (yön), tradeSide=open/close (işlem tipi)
+
+### FILES CHANGED
+- `bitget_service.py` - Order params düzeltildi
+
+---
+
 ## v2.4.1 (2025-12-22)
 
 ### ADDED

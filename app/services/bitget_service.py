@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.3
+T-TARS Bitget Service v2.4.4
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.4:
+- NEW: get_order_history_track() - Kapanmış pozisyon geçmişi
+- NEW: get_closed_position_pnl() - PnL ve WIN/LOSS bilgisi
+- Endpoint: /api/v2/copy/mix-trader/order-history-track
 
 v2.4.3:
 - FIX: TP/SL preset parametreleri duzeltildi (Bitget API doc)
@@ -298,6 +303,120 @@ class BitgetService:
         except Exception as e:
             logger.error(f"trackingNo arama hatası: {e}")
             return None
+
+    def get_order_history_track(self, tracking_no=None, symbol=None, limit=20):
+        """
+        v2.4.4: Kapanmış Copy Trade pozisyonlarının geçmişi
+        
+        Endpoint: /api/v2/copy/mix-trader/order-history-track
+        
+        Returns:
+            dict: {
+                'success': True/False,
+                'orders': [{trackingNo, symbol, posSide, achievedProfits, ...}]
+            }
+        """
+        self._require_auth()
+        try:
+            params = {
+                'productType': 'USDT-FUTURES',
+                'pageSize': str(limit)
+            }
+            
+            if symbol:
+                params['symbol'] = self._get_bitget_symbol(symbol)
+            
+            logger.info(f"📋 Copy Trade history çekiliyor...")
+            response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-history-track', params=params)
+            
+            if response and response.get('code') == '00000':
+                data = response.get('data')
+                if data is None:
+                    return {'success': True, 'orders': []}
+                
+                tracking_list = data.get('trackingList') or []
+                logger.info(f"✅ Copy Trade history: {len(tracking_list)} kayıt")
+                
+                # Belirli trackingNo aranıyorsa filtrele
+                if tracking_no:
+                    for order in tracking_list:
+                        if str(order.get('trackingNo')) == str(tracking_no):
+                            return {'success': True, 'orders': [order]}
+                    return {'success': True, 'orders': []}
+                
+                return {'success': True, 'orders': tracking_list}
+            else:
+                error_msg = response.get('msg', 'Unknown error') if response else 'No response'
+                logger.error(f"❌ Copy Trade history hatası: {error_msg}")
+                return {'success': False, 'orders': [], 'error': error_msg}
+        except Exception as e:
+            logger.error(f"❌ Copy Trade history API hatası: {e}")
+            return {'success': False, 'orders': [], 'error': str(e)}
+
+    def get_closed_position_pnl(self, tracking_no):
+        """
+        v2.4.4: Kapanmış pozisyonun PnL bilgisini al
+        
+        Returns:
+            dict: {
+                'success': True/False,
+                'pnl': float,
+                'result': 'WIN'/'LOSS'/'BREAKEVEN',
+                'entry_price': float,
+                'close_price': float,
+                'fees': float,
+                'symbol': str,
+                'side': str
+            }
+        """
+        try:
+            result = self.get_order_history_track(tracking_no=tracking_no)
+            
+            if not result.get('success'):
+                return {'success': False, 'error': result.get('error', 'API error')}
+            
+            orders = result.get('orders', [])
+            if not orders:
+                logger.warning(f"⚠️ trackingNo {tracking_no} history'de bulunamadı")
+                return {'success': False, 'error': 'Order not found in history'}
+            
+            order = orders[0]
+            
+            # PnL bilgilerini çek
+            pnl = float(order.get('achievedProfits', 0))
+            entry_price = float(order.get('openAvgPrice', 0))
+            close_price = float(order.get('closeAvgPrice', 0))
+            open_fee = float(order.get('openFee', 0))
+            close_fee = float(order.get('closeFee', 0))
+            total_fees = open_fee + close_fee
+            
+            # WIN/LOSS/BREAKEVEN belirle
+            if pnl > 0.01:
+                trade_result = 'WIN'
+            elif pnl < -0.01:
+                trade_result = 'LOSS'
+            else:
+                trade_result = 'BREAKEVEN'
+            
+            symbol = order.get('symbol', '')
+            side = order.get('posSide', 'unknown')
+            
+            logger.info(f"📊 PnL bilgisi: {symbol} {side.upper()} | PnL: ${pnl:.2f} | {trade_result}")
+            
+            return {
+                'success': True,
+                'pnl': pnl,
+                'result': trade_result,
+                'entry_price': entry_price,
+                'close_price': close_price,
+                'fees': total_fees,
+                'symbol': symbol,
+                'side': side
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ get_closed_position_pnl error: {e}")
+            return {'success': False, 'error': str(e)}
 
     def check_connection(self):
         try:

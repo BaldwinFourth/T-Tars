@@ -7,6 +7,9 @@ Main Flask application with routes.
 v2.4.4:
 - IMPROVED: REPLACE mesaji ayri format (EMiR GUNCELLENDi vs YENi EMiR)
 - ADD: Eski order ID ve replace sebebi Telegram mesajinda gosteriliyor
+- NEW: Monitor'da pozisyon kapaninca PnL cekiliyor (Bitget API)
+- NEW: WIN/LOSS otomatik belirleniyor
+- NEW: Pozisyon kapaninca Telegram mesaji gonderiliyor
 
 v2.4.3:
 - FIX: REPLACE handling duzeltildi (eski order cancel + yeni order)
@@ -418,8 +421,57 @@ def monitor_setups():
                     
                     if str(setup_tracking_no) not in active_tracking_nos:
                         setup_id = setup.get('setup_id')
-                        logger.info(f"🔴 Pozisyon kapanmış: {setup_id}")
-                        tracking.update_setup_from_bitget(setup_id, {'status': 'CLOSED', 'result': None})
+                        pair = setup.get('pair', 'UNKNOWN')
+                        direction = setup.get('direction', 'UNKNOWN').upper()
+                        coin_name = pair.replace('USDT', '').replace('/USDT:USDT', '')
+                        
+                        logger.info(f"🔴 Pozisyon kapanmış: {setup_id} ({coin_name} {direction})")
+                        
+                        # v2.4.4: Bitget'ten PnL bilgisi çek
+                        pnl_data = bitget.get_closed_position_pnl(setup_tracking_no)
+                        
+                        if pnl_data.get('success'):
+                            pnl = pnl_data.get('pnl', 0)
+                            trade_result = pnl_data.get('result', 'BREAKEVEN')
+                            entry_price = pnl_data.get('entry_price', 0)
+                            close_price = pnl_data.get('close_price', 0)
+                            
+                            # Tracking güncelle
+                            tracking.update_setup_from_bitget(setup_id, {
+                                'status': 'CLOSED',
+                                'result': trade_result,
+                                'pnl': pnl,
+                                'entry_price': entry_price,
+                                'close_price': close_price
+                            })
+                            
+                            # v2.4.4: Telegram mesajı
+                            result_emoji = "🟢" if trade_result == 'WIN' else "🔴" if trade_result == 'LOSS' else "⚪"
+                            pnl_sign = "+" if pnl >= 0 else ""
+                            dir_emoji = "📈" if direction == "LONG" else "📉"
+                            
+                            close_msg = f"""
+━━━━━━━━━━━━━━━━━━━━━━
+{result_emoji} *POZİSYON KAPANDI*
+━━━━━━━━━━━━━━━━━━━━━━
+
+{dir_emoji} *{coin_name}* | {direction}
+💵 Giriş: {format_price(entry_price)}
+💰 Çıkış: {format_price(close_price)}
+
+{result_emoji} *Sonuç: {trade_result}*
+💲 P/L: {pnl_sign}${pnl:.2f}
+
+━━━━━━━━━━━━━━━━━━━━━━
+⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
+━━━━━━━━━━━━━━━━━━━━━━
+"""
+                            telegram.send(close_msg, chat_id=Config.TELEGRAM_CHAT_ID)
+                        else:
+                            # PnL alınamadı, sadece CLOSED olarak işaretle
+                            logger.warning(f"⚠️ PnL alınamadı: {setup_id} - {pnl_data.get('error')}")
+                            tracking.update_setup_from_bitget(setup_id, {'status': 'CLOSED', 'result': None})
+                        
                         updates += 1
                         
         except Exception as e:

@@ -624,16 +624,40 @@ def handle_positions_command(chat_id):
 
 
 def handle_help_command(chat_id):
-    """/help - Yardım ve CHANGELOG"""
+    """/help - Yardım ve CHANGELOG (sadece güncel versiyon)"""
     def run_help():
         try:
+            # v2.4.4: Sadece güncel versiyon bilgisi göster
             changelog_text = ""
             try:
                 changelog = _storage.get_changelog()
                 if changelog:
-                    changelog_text = changelog[:1500]
-                    if len(changelog) > 1500:
-                        changelog_text += "\n... (devamı için CHANGELOG.md'ye bakın)"
+                    # Sadece ilk versiyon bloğunu al (## v ile başlayan ikinci satıra kadar)
+                    lines = changelog.split('\n')
+                    current_version_lines = []
+                    found_first_version = False
+                    
+                    for line in lines:
+                        # İlk versiyon başlığını bul
+                        if line.startswith('## v') and not found_first_version:
+                            found_first_version = True
+                            current_version_lines.append(line)
+                            continue
+                        
+                        # İkinci versiyon başlığına gelince dur
+                        if line.startswith('## v') and found_first_version:
+                            break
+                        
+                        # İlk versiyon içeriğini ekle
+                        if found_first_version:
+                            current_version_lines.append(line)
+                    
+                    changelog_text = '\n'.join(current_version_lines).strip()
+                    
+                    # Çok uzunsa kısalt
+                    if len(changelog_text) > 600:
+                        changelog_text = changelog_text[:600] + "\n..."
+                        
             except Exception as e:
                 logger.warning(f"CHANGELOG fetch error: {e}")
                 changelog_text = "CHANGELOG yüklenemedi"
@@ -667,7 +691,7 @@ AI Engine: Claude Haiku 4.5
 • /help - Bu menü
 
 ━━━━━━━━━━━━━━━━━━━━━━
-📝 *CHANGELOG*
+📝 *SON GÜNCELLEME*
 ━━━━━━━━━━━━━━━━━━━━━━
 {changelog_text}
 ━━━━━━━━━━━━━━━━━━━━━━

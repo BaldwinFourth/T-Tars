@@ -1,5 +1,26 @@
 # T-TARS Trading Bot - CHANGELOG
 
+## v2.4.4 (2025-12-24)
+
+### Improved
+- **REPLACE mesaj formatı**: Emir güncellendiğinde farklı Telegram mesajı
+  - YENİ EMİR → `🟢 YENİ EMİR AÇILDI`
+  - REPLACE → `🔄 EMİR GÜNCELLENDİ`
+- **Detaylı bilgi**: Eski Order ID ve güncelleme sebebi mesajda gösteriliyor
+- **Order ID**: Tüm mesajlarda yeni order ID görünür
+
+### Fixed
+- **/scan market_cache**: `/scan` komutu artık TradingView volume verisini kullanıyor
+- **/plan market_cache**: `/plan` komutu da cache'den volume alıyor
+- **/status cache info**: Cache entry sayısı gösteriliyor
+
+### Technical
+- `telegram_handlers.py`: `init_handlers()` fonksiyonuna `market_cache` parametresi eklendi
+- `main.py`: `init_handlers()` çağrısına `MARKET_CACHE` geçiriliyor
+- `_market_cache` global değişkeni eklendi
+
+---
+
 ## v2.4.3 (2025-12-22)
 
 ### FIXED

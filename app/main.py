@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.4.3
+T-TARS Trading Bot v2.4.4
 ==========================
 Main Flask application with routes.
+
+v2.4.4:
+- IMPROVED: REPLACE mesaji ayri format (EMiR GUNCELLENDi vs YENi EMiR)
+- ADD: Eski order ID ve replace sebebi Telegram mesajinda gosteriliyor
 
 v2.4.3:
 - FIX: REPLACE handling duzeltildi (eski order cancel + yeni order)
@@ -129,7 +133,7 @@ try:
     bitget = BitgetService()
     tracking = TrackingService()
     
-    init_handlers(telegram, bitget, claude, storage, tracking)
+    init_handlers(telegram, bitget, claude, storage, tracking, market_cache=MARKET_CACHE)
     
     logger.info(f"✅ All services initialized (v{Config.VERSION})")
 except Exception as e:
@@ -439,7 +443,8 @@ def monitor_setups():
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
     """
-    v2.3.8: Otomatik Tarama + Volume Analyzer + Claude AI
+    v2.4.4: Otomatik Tarama + Volume Analyzer + Claude AI
+    - REPLACE durumunda farklı Telegram mesajı
     """
     interval = Config.MONITOR_INTERVAL_MINUTES
     current_minute = datetime.now().minute
@@ -564,23 +569,30 @@ def auto_analyze():
                                 logger.info(f"⚠️ DUPLICATE: {coin_name} {direction} [{timeframe}] - Skipping")
                                 continue
                             
+                            # v2.4.4: REPLACE bilgilerini sakla
+                            is_replace = False
+                            old_order_id_cancelled = None
+                            replace_reason = None
+                            
                             if dup_check['status'] == 'REPLACE':
+                                is_replace = True
                                 existing = dup_check.get('existing_setup', {})
-                                old_order_id = existing.get('order_id')
+                                old_order_id_cancelled = existing.get('order_id')
                                 old_setup_id = existing.get('setup_id')
+                                replace_reason = dup_check.get('reason', '')
                                 
-                                logger.info(f"🔄 REPLACE: {coin_name} {direction} - {dup_check['reason']}")
+                                logger.info(f"🔄 REPLACE: {coin_name} {direction} - {replace_reason}")
                                 
                                 # Eski order'ı cancel et
-                                if old_order_id:
-                                    cancel_result = bitget.cancel_order(old_order_id, pair)
+                                if old_order_id_cancelled:
+                                    cancel_result = bitget.cancel_order(old_order_id_cancelled, pair)
                                     if cancel_result.get('success'):
-                                        logger.info(f"🗑️ Eski order cancelled: {old_order_id}")
+                                        logger.info(f"🗑️ Eski order cancelled: {old_order_id_cancelled}")
                                         # EXPIRED olarak işaretle
                                         if old_setup_id:
                                             tracking.mark_setup_expired(old_setup_id)
                                     else:
-                                        logger.warning(f"⚠️ Cancel failed: {old_order_id} - {cancel_result.get('error')}")
+                                        logger.warning(f"⚠️ Cancel failed: {old_order_id_cancelled} - {cancel_result.get('error')}")
                                 # Devam et → yeni order açılacak
                             
                             adjustments = decision.get('adjustments', {})
@@ -638,18 +650,25 @@ def auto_analyze():
                                 if setup_id:
                                     total_setups += 1
                                     
-                                    coin_name = pair.replace('/USDT:USDT', '')
                                     dir_emoji = "🟢" if direction == "LONG" else "🔴"
                                     
                                     adj_info = ""
                                     if adjustments.get('adjusted'):
                                         adj_info = f"\n⚙️ Stop Adj: {adjustments.get('type', 'N/A')}"
                                     
+                                    # v2.4.4: REPLACE vs NEW mesaj formatı
+                                    if is_replace:
+                                        header = "🔄 *EMİR GÜNCELLENDİ*"
+                                        replace_info = f"\n🗑️ Eski Order: `{old_order_id_cancelled}`\n📝 {replace_reason}"
+                                    else:
+                                        header = f"{dir_emoji} *YENİ EMİR AÇILDI*"
+                                        replace_info = ""
+                                    
                                     notify_msg = f"""
 ━━━━━━━━━━━━━━━━━━━━━━
-{dir_emoji} *YENİ EMİR AÇILDI*
+{header}
 ━━━━━━━━━━━━━━━━━━━━━━
-
+{replace_info}
 📊 *{coin_name}* | {direction} | {timeframe}
 💵 Entry: {format_price(setup.get('entry_price', 0))}
 🛑 SL: {format_price(exec_result.get('stop_price', 0))}
@@ -657,6 +676,7 @@ def auto_analyze():
 
 📦 Kontrat: {exec_result.get('contracts', 'N/A')}
 💰 Pozisyon: ${exec_result.get('position_usd', 0):.2f}
+🆔 Order: `{exec_result.get('order_id', 'N/A')}`
 
 🧠 *Claude AI*
 • Karar: {action} ({confidence}%)

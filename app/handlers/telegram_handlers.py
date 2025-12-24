@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.3.11
+T-TARS Telegram Handlers v2.4.4
 ================================
 Telegram bot komut handler'ları.
+
+v2.4.4:
+- FIX: /scan market_cache parametresi eklendi
+- /scan artık TradingView volume verisini kullanıyor
 
 v2.3.11:
 - FIX: /score f-string format hatası düzeltildi
@@ -60,17 +64,22 @@ _claude = None
 _storage = None
 _tracking = None
 _trading_enabled = True
+_market_cache = None  # v2.4.4: Market cache referansı
 
 
-def init_handlers(telegram, exchange, claude, storage, tracking):
-    global _telegram, _exchange, _claude, _storage, _tracking, _trading_enabled
+def init_handlers(telegram, exchange, claude, storage, tracking, market_cache=None):
+    """
+    v2.4.4: market_cache parametresi eklendi
+    """
+    global _telegram, _exchange, _claude, _storage, _tracking, _trading_enabled, _market_cache
     _telegram = telegram
     _exchange = exchange
     _claude = claude
     _storage = storage
     _tracking = tracking
+    _market_cache = market_cache  # v2.4.4
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.3.11) - Trading: {_trading_enabled}")
+    logger.info(f"✅ Telegram handlers initialized (v2.4.4) - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
 
 
 # --------------------------
@@ -115,7 +124,8 @@ def handle_plan_command(text, chat_id):
             
             _telegram.send(f"🔄 *{coin_name} taranıyor...*\n⏳ Tüm timeframe'ler analiz ediliyor...", chat_id=chat_id)
             
-            market_data = _exchange.get_complete_analysis_data(ticker)
+            # v2.4.4: market_cache kullan
+            market_data = _exchange.get_complete_analysis_data(ticker, market_cache=_market_cache)
             if not market_data:
                 _telegram.send("❌ Market verisi alınamadı.", chat_id=chat_id)
                 return
@@ -293,6 +303,10 @@ def handle_log_command(text, chat_id):
 # --------------------------
 
 def handle_scan_command(chat_id):
+    """
+    /scan - Market taraması
+    v2.4.4: market_cache kullanarak TradingView volume verisi
+    """
     def run_scan():
         try:
             pairs = Config.AUTO_SCAN_PAIRS
@@ -302,7 +316,9 @@ def handle_scan_command(chat_id):
             for pair in pairs:
                 try:
                     coin_name = pair.replace('/USDT:USDT', '').replace('/USDT', '')
-                    market_data = _exchange.get_complete_analysis_data(pair)
+                    
+                    # v2.4.4 FIX: market_cache parametresi eklendi
+                    market_data = _exchange.get_complete_analysis_data(pair, market_cache=_market_cache)
                     
                     if not market_data:
                         results.append(f"⚠️ {coin_name}: No Data")
@@ -335,8 +351,13 @@ def handle_scan_command(chat_id):
                     logger.error(f"Scan error {pair}: {e}")
                     results.append(f"❌ {coin_name}: Err")
             
+            # v2.4.4: Cache durumunu göster
+            cache_status = ""
+            if _market_cache:
+                cache_status = f"\n📊 Cache: {len(_market_cache)} entry"
+            
             msg = "🔍 *TARAMA SONUCU*\n\n" + "\n".join(results)
-            msg += f"\n\n🎯 *Toplam:* {total_new_setups} yeni setup."
+            msg += f"\n\n🎯 *Toplam:* {total_new_setups} yeni setup.{cache_status}"
             
             _telegram.send(msg, chat_id=chat_id)
             
@@ -515,6 +536,9 @@ def handle_status_command(chat_id):
             check_time = (time.time() - check_start) * 1000
             trading_status = '🔥 AKTİF' if _trading_enabled else '🔴 DURDURULDU'
             
+            # v2.4.4: Cache durumu
+            cache_info = f"Cache: {len(_market_cache)} entries" if _market_cache else "Cache: N/A"
+            
             msg = f"""
 ━━━━━━━━━━━━━━━━━━━━━━
 🤖 *T-TARS DURUM*
@@ -532,6 +556,7 @@ def handle_status_command(chat_id):
 • Exchange: Bitget
 • AI Engine: Claude Haiku 4.5
 • Trading: {trading_status}
+• {cache_info}
 • Response: {check_time:.0f}ms
 
 ━━━━━━━━━━━━━━━━━━━━━━

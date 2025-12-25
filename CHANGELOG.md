@@ -9,6 +9,16 @@
 ### Fixed
 - **CRITICAL: status PENDING bug**: Order açıldığında status FILLED olarak kaydedilmiyordu, monitor bu yüzden kapanan pozisyonları görmüyordu
 
+### Changed
+- **/score Bitget API'den çekiyor**: GCS tracking yerine direkt Bitget Copy Trade history API kullanılıyor
+- `get_trade_history_stats()` fonksiyonu eklendi (bitget_service.py)
+- WIN/LOSS artık gerçek Bitget verilerinden hesaplanıyor
+
+### Why This Change?
+- GCS'deki tracking sistemi `status: PENDING` bug'ı nedeniyle çalışmıyordu
+- Bitget API zaten tüm trade history'yi tutuyor - neden ikinci bir sistem kullanalım?
+- Daha güvenilir, gerçek zamanlı veri
+
 ---
 
 ## v2.4.4 (2025-12-24)
@@ -35,6 +45,7 @@
 - `bitget_service.py`: `get_order_history_track()`, `get_closed_position_pnl()` eklendi
 - `main.py` monitor: PnL çekme + WIN/LOSS + Telegram mesajı
 - `telegram_handlers.py`: market_cache + /help kısaltma
+- **CRITICAL: status PENDING bug**: Order açıldığında status FILLED olarak kaydedilmiyordu
 
 ---
 

@@ -1,48 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.4
+T-TARS Bitget Service v2.4.5
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.5:
+- NEW: get_trade_history_stats() - Bitget history'den WIN/LOSS istatistikleri
+- /score komutu artik GCS yerine Bitget API'den veri cekiyor
 
 v2.4.4:
 - NEW: get_order_history_track() - Kapanmış pozisyon geçmişi
 - NEW: get_closed_position_pnl() - PnL ve WIN/LOSS bilgisi
 - Endpoint: /api/v2/copy/mix-trader/order-history-track
 
-v2.4.3:
-- FIX: TP/SL preset parametreleri duzeltildi (Bitget API doc)
-- CHANGED: stopSurplus/stopLoss → presetStopSurplusPrice/presetStopLossPrice
-
-v2.4.2:
-- FIX: Hedge mode params duzeltildi (Bitget API doc'a gore)
-- CHANGED: holdSide kaldirildi, tradeSide='open'/'close' kullaniliyor
-- side=buy (LONG), side=sell (SHORT), tradeSide=open/close
-
-v2.4.1:
-- FIX: Hedge mode icin holdSide parametresi eklendi
-- FIX: "unilateral position" hatasi (40774) duzeltildi
-
-v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
-- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
-
-v2.3.14:
-- NEW: place_copy_trade_order() - Copy Trade API ile order aç
-- CHANGED: place_order_with_tp_sl() → Copy Trade API kullanıyor
-- NEW: trackingNo response'da döndürülüyor
-- FIXED: trackingNo:None sorunu çözüldü
-
-v2.3.13:
-- NEW: close_position() → Limit order desteği (market yerine)
-- NEW: Config.CLOSE_ORDER_TYPE ('limit' / 'market')
-- NEW: Config.CLOSE_SLIPPAGE_PCT (%0.2 default)
-- Slippage: LONG close → price * (1 - slippage), SHORT close → price * (1 + slippage)
-
-v2.3.8:
-- CHANGED: MARKET_CACHE_TTL → Config.MARKET_CACHE_TTL (DRY)
-- CHANGED: Volume spike/strength thresholds → calculators.py'den import (DRY)
 """
 
 import ccxt
@@ -107,7 +77,7 @@ def round_price_to_precision(price, precision):
 
 
 class BitgetService:
-    """Bitget Borsa Servisi - v2.4.3 (Hedge Mode + Copy Trade API + TP/SL Fix)"""
+    """Bitget Borsa Servisi - v2.4.5 (Hedge Mode + Copy Trade API + Trade Stats)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d', '4S': '4h', '4h': '4h',
@@ -150,7 +120,7 @@ class BitgetService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"Bitget Servisi v2.4.3 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
+            logger.info(f"Bitget Servisi v2.4.5 Hazır | Lev:{Config.DEFAULT_LEVERAGE}x | "
                        f"Close:{Config.CLOSE_ORDER_TYPE} | Copy Trade API: Active")
 
         except Exception as e:
@@ -416,6 +386,119 @@ class BitgetService:
             
         except Exception as e:
             logger.error(f"❌ get_closed_position_pnl error: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_trade_history_stats(self, limit=100):
+        """
+        v2.4.5: Bitget Copy Trade order history'den WIN/LOSS istatistikleri
+        
+        GCS tracking yerine direkt Bitget API'den veri çeker.
+        
+        Returns:
+            dict: {
+                'success': True/False,
+                'total_trades': int,
+                'winning_trades': int,
+                'losing_trades': int,
+                'breakeven_trades': int,
+                'win_rate': float,
+                'total_pnl': float,
+                'coin_breakdown': {coin: {wins, losses, pnl, trades, win_rate}},
+                'trades': [{symbol, pnl, result, ...}]
+            }
+        """
+        self._require_auth()
+        try:
+            params = {
+                'productType': 'USDT-FUTURES',
+                'pageSize': str(limit)
+            }
+            
+            logger.info(f"📊 Trade history stats çekiliyor (limit={limit})...")
+            response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-history-track', params=params)
+            
+            if not response or response.get('code') != '00000':
+                error_msg = response.get('msg', 'Unknown error') if response else 'No response'
+                logger.error(f"❌ Trade history stats hatası: {error_msg}")
+                return {'success': False, 'error': error_msg}
+            
+            data = response.get('data')
+            tracking_list = (data.get('trackingList') or []) if data else []
+            
+            logger.info(f"📋 Trade history: {len(tracking_list)} kayıt bulundu")
+            
+            # İstatistik hesaplama
+            stats = {
+                'success': True,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'breakeven_trades': 0,
+                'win_rate': 0.0,
+                'total_pnl': 0.0,
+                'coin_breakdown': {},
+                'trades': []
+            }
+            
+            for order in tracking_list:
+                try:
+                    pnl = float(order.get('achievedProfits', 0))
+                    symbol = order.get('symbol', 'UNKNOWN')
+                    coin = symbol.replace('USDT', '')
+                    
+                    stats['total_trades'] += 1
+                    stats['total_pnl'] += pnl
+                    
+                    # WIN/LOSS belirleme (threshold: $0.01)
+                    if pnl > 0.01:
+                        result = 'WIN'
+                        stats['winning_trades'] += 1
+                    elif pnl < -0.01:
+                        result = 'LOSS'
+                        stats['losing_trades'] += 1
+                    else:
+                        result = 'BREAKEVEN'
+                        stats['breakeven_trades'] += 1
+                    
+                    # Coin breakdown
+                    if coin not in stats['coin_breakdown']:
+                        stats['coin_breakdown'][coin] = {'wins': 0, 'losses': 0, 'pnl': 0.0, 'trades': 0}
+                    
+                    stats['coin_breakdown'][coin]['trades'] += 1
+                    stats['coin_breakdown'][coin]['pnl'] += pnl
+                    if result == 'WIN':
+                        stats['coin_breakdown'][coin]['wins'] += 1
+                    elif result == 'LOSS':
+                        stats['coin_breakdown'][coin]['losses'] += 1
+                    
+                    # Trade detayı
+                    stats['trades'].append({
+                        'symbol': symbol,
+                        'coin': coin,
+                        'pnl': pnl,
+                        'result': result
+                    })
+                    
+                except Exception as e:
+                    logger.warning(f"Trade parse error: {e}")
+                    continue
+            
+            # Win rate hesapla
+            completed = stats['winning_trades'] + stats['losing_trades']
+            if completed > 0:
+                stats['win_rate'] = (stats['winning_trades'] / completed) * 100
+            
+            # Coin breakdown'a win_rate ekle
+            for coin, coin_data in stats['coin_breakdown'].items():
+                coin_completed = coin_data['wins'] + coin_data['losses']
+                coin_data['win_rate'] = round((coin_data['wins'] / coin_completed * 100), 1) if coin_completed > 0 else 0.0
+            
+            logger.info(f"✅ Trade stats: {stats['total_trades']} trades, {stats['winning_trades']}W/{stats['losing_trades']}L, PnL: ${stats['total_pnl']:.2f}")
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"❌ Trade history stats exception: {e}")
             return {'success': False, 'error': str(e)}
 
     def check_connection(self):

@@ -428,9 +428,9 @@ def monitor_setups():
                             dir_emoji = "📈" if direction == "LONG" else "📉"
                             
                             close_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 {result_emoji} *POZİSYON KAPANDI*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
 {dir_emoji} *{coin_name}* | {direction}
 💵 Giriş: {format_price(entry_price)}
@@ -439,9 +439,9 @@ def monitor_setups():
 {result_emoji} *Sonuç: {trade_result}*
 💲 P/L: {pnl_sign}${pnl:.2f}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 """
                             telegram.send(close_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                         else:
@@ -695,9 +695,9 @@ def auto_analyze():
                                         replace_info = ""
                                     
                                     notify_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 {header}
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 {replace_info}
 📊 *{coin_name}* | {direction} | {timeframe}
 💵 Entry: {format_price(setup.get('entry_price', 0))}
@@ -713,9 +713,9 @@ def auto_analyze():
 • Sebep: {reasoning[:50]}...
 • Python Score: {python_score*100:.0f}/100
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 """
                                     telegram.send(notify_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                             else:

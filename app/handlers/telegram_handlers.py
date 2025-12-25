@@ -1,25 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.4.4
+T-TARS Telegram Handlers v2.4.5
 ================================
 Telegram bot komut handler'ları.
+
+v2.4.5:
+- CHANGED: /score artık Bitget API'den çekiyor (GCS tracking yerine)
+- NEW: get_trade_history_stats() kullanılıyor
 
 v2.4.4:
 - FIX: /scan market_cache parametresi eklendi
 - /scan artık TradingView volume verisini kullanıyor
 
-v2.3.11:
-- FIX: /score f-string format hatası düzeltildi
-- FIX: available_balance ternary operatör sorunu çözüldü
-
-v2.3.1:
-- FIX: /score bakiye - Available yerine TOTAL bakiye gösteriliyor
-- FIX: Best/Worst gösterimi - min trade yoksa da göster
-- ADD: Debug bilgileri eklendi
-
-v2.3.0:
-- REMOVED: execute_trade_for_setup() → bitget_service.py'ye taşındı
-- Telegram bildirimleri main.py'de yapılıyor
 """
 
 import logging
@@ -168,16 +160,16 @@ def handle_plan_command(text, chat_id):
                 conf_emoji = "🔥" if conf == "HIGH" else "⚡" if conf == "MEDIUM" else "💡"
                 
                 plan_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🎯 *T-TARS AKILLI PLAN*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📊 *{coin_name}* | {tf} | {bias_emoji}
 💵 Anlık Fiyat: {format_price(current_price)}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 {dir_emoji} *EN İYİ FIRSAT: {direction}*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 {conf_emoji} *Güven:* {conf}
 📈 *Setup:* {setup_type}
@@ -189,25 +181,25 @@ def handle_plan_command(text, chat_id):
 🏆 *TP2:* {tp2}
 📊 *R:R:* {rr:.2f}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📉 *TEKNİK VERİLER*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📏 ATR({tf}): {format_price(atr_val)}
 📊 Hacim: {vol_ratio:.2f}x
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🕯 *PDC (Previous Day Candle)*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • High: {format_price(pdc_high)}
 • Low: {format_price(pdc_low)}
 • Open: {format_price(pdc_open)}
 • Close: {format_price(pdc_close)}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📐 *FİBONACCİ SEVİYELERİ*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • 0.0%: {format_price(fibo.get('0.0', 0))}
 • 23.6%: {format_price(fibo.get('23.6', 0))}
@@ -217,44 +209,44 @@ def handle_plan_command(text, chat_id):
 • 78.6%: {format_price(fibo.get('78.6', 0))}
 • 100%: {format_price(fibo.get('100.0', 0))}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
             else:
                 plan_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 ℹ️ *T-TARS GENEL BAKIŞ*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📊 *{coin_name}* | {bias_emoji}
 💵 Anlık Fiyat: {format_price(current_price)}
 
 ⚠️ *Şu an net bir setup bulunamadı.*
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🕯 *PDC (Previous Day Candle)*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • High: {format_price(pdc_high)}
 • Low: {format_price(pdc_low)}
 • Open: {format_price(pdc_open)}
 • Close: {format_price(pdc_close)}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📐 *KRİTİK SEVİYELER (Fibo)*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • Destek (61.8%): {format_price(fibo.get('61.8', 0))}
 • Pivot (50.0%): {format_price(fibo.get('50.0', 0))}
 • Direnç (38.2%): {format_price(fibo.get('38.2', 0))}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 💡 *ÖNERİ:* PDC High/Low kırılımı
 veya Fibo 61.8% tepkisi bekleyin.
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
 
             _telegram.send(plan_msg, chat_id=chat_id)
@@ -370,16 +362,16 @@ def handle_scan_command(chat_id):
 
 
 def handle_score_command(chat_id):
-    """/score - Performans raporu v2.3.11"""
+    """/score - Performans raporu v2.4.5 - Bitget API'den çeker"""
     def run_score():
         try:
-            if not _tracking:
-                _telegram.send("❌ Tracking servisi aktif değil.", chat_id=chat_id)
+            if not _exchange:
+                _telegram.send("❌ Exchange servisi aktif değil.", chat_id=chat_id)
                 return
 
-            # v2.3.1 FIX: TOTAL bakiye al, Available değil!
-            total_balance = None
-            available_balance = None
+            # v2.4.5: Bakiye bilgisi
+            total_balance = 0.0
+            available_balance = 0.0
             try:
                 bal = _exchange.get_balance()
                 if bal.get('success'):
@@ -389,42 +381,48 @@ def handle_score_command(chat_id):
             except Exception as e:
                 logger.warning(f"Balance fetch error: {e}")
             
-            # v2.3.1: Total bakiye ile stats al
-            stats = _tracking.get_aggregate_stats(real_balance=total_balance)
+            # v2.4.5: Bitget API'den trade history stats çek
+            stats = _exchange.get_trade_history_stats(limit=100)
             
-            # v2.3.1: Total bakiyeyi göster
-            display_balance = total_balance if total_balance and total_balance > 0 else stats.get('starting_balance', 500.0)
+            if not stats.get('success'):
+                _telegram.send(f"❌ Trade history alınamadı: {stats.get('error', 'Unknown')}", chat_id=chat_id)
+                return
             
-            # v2.3.11 FIX: available_balance için safe değer
-            available_display = available_balance if available_balance else 0.0
+            # Stats değerleri
+            total_trades = stats.get('total_trades', 0)
+            winning_trades = stats.get('winning_trades', 0)
+            losing_trades = stats.get('losing_trades', 0)
+            breakeven_trades = stats.get('breakeven_trades', 0)
+            win_rate = stats.get('win_rate', 0)
+            total_pnl = stats.get('total_pnl', 0)
             
-            profit_emoji = "📈" if stats['profit'] >= 0 else "📉"
-            profit_sign = "+" if stats['profit'] >= 0 else ""
+            completed_trades = winning_trades + losing_trades
+            loss_rate = (losing_trades / completed_trades * 100) if completed_trades > 0 else 0
             
-            # Tamamlanan işlem sayısı
-            completed_trades = stats['winning_trades'] + stats['losing_trades']
+            profit_emoji = "📈" if total_pnl >= 0 else "📉"
+            profit_sign = "+" if total_pnl >= 0 else ""
+            profit_pct = (total_pnl / total_balance * 100) if total_balance > 0 else 0
             
             msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━
 📊 *T-TARS İSTATİSTİK RAPORU*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━
 
 🎯 *Genel Durum*
-• Total: {stats['total_setups']} | Win: {stats['winning_trades']} | Loss: {stats['losing_trades']}
-• Win Rate: %{stats['win_rate']:.1f} | Loss Rate: %{stats['loss_rate']:.1f}
-• Pending: {stats['pending_setups']} | BE: {stats['breakeven_trades']} | Expired: {stats.get('expired_setups', 0)}
-• Completed: {completed_trades}
+• Total: {total_trades} | Win: {winning_trades} | Loss: {losing_trades}
+• Win Rate: %{win_rate:.1f} | Loss Rate: %{loss_rate:.1f}
+• BE: {breakeven_trades} | Completed: {completed_trades}
 
 {profit_emoji} *P/L Durumu*
-• Bakiye (Total): ${display_balance:,.2f}
-• Kullanılabilir: ${available_display:,.2f}
-• Kar/Zarar: {profit_sign}${stats['profit']:,.2f} ({profit_sign}%{stats['profit_percent']:.1f})
+• Bakiye (Total): ${total_balance:,.2f}
+• Kullanılabilir: ${available_balance:,.2f}
+• Kar/Zarar: {profit_sign}${total_pnl:,.2f} ({profit_sign}%{profit_pct:.1f})
 """
 
-            # v2.3.1: Best/Worst Coin - min trade kontrolü kaldırıldı, tümünü göster
+            # Coin breakdown
             coin_breakdown = stats.get('coin_breakdown', {})
             if coin_breakdown:
-                # En iyi 5 coin (win_rate'e göre sırala)
+                # En iyi coinler (win_rate'e göre sırala)
                 sorted_coins = sorted(
                     [(c, s) for c, s in coin_breakdown.items() if s['wins'] + s['losses'] > 0],
                     key=lambda x: x[1]['win_rate'],
@@ -435,44 +433,23 @@ def handle_score_command(chat_id):
                     msg += "\n🏆 *Best Coins* (by Win Rate)\n"
                     for i, (coin, data) in enumerate(sorted_coins[:5], 1):
                         completed = data['wins'] + data['losses']
-                        msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
+                        pnl_sign = "+" if data['pnl'] >= 0 else ""
+                        msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed}) | {pnl_sign}${data['pnl']:.2f}\n"
                     
-                    # Worst coins (tersten)
-                    worst_coins = sorted_coins[-5:] if len(sorted_coins) > 5 else []
-                    if worst_coins:
-                        msg += "\n💀 *Worst Coins* (by Win Rate)\n"
+                    # Worst coins
+                    if len(sorted_coins) > 5:
+                        worst_coins = sorted_coins[-3:]
+                        msg += "\n💀 *Worst Coins*\n"
                         for i, (coin, data) in enumerate(reversed(worst_coins), 1):
                             completed = data['wins'] + data['losses']
-                            msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
+                            pnl_sign = "+" if data['pnl'] >= 0 else ""
+                            msg += f"  {i}. {coin} - W:{data['win_rate']}% ({data['wins']}/{completed}) | {pnl_sign}${data['pnl']:.2f}\n"
             
-            # v2.3.1: Best/Worst TF
-            tf_breakdown = stats.get('timeframe_breakdown', {})
-            if tf_breakdown:
-                sorted_tfs = sorted(
-                    [(tf, s) for tf, s in tf_breakdown.items() if s['wins'] + s['losses'] > 0],
-                    key=lambda x: x[1]['win_rate'],
-                    reverse=True
-                )
-                
-                if sorted_tfs:
-                    msg += "\n⏱ *Best TimeFrames* (by Win Rate)\n"
-                    for i, (tf, data) in enumerate(sorted_tfs[:5], 1):
-                        completed = data['wins'] + data['losses']
-                        msg += f"  {i}. {tf} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
-                    
-                    worst_tfs = sorted_tfs[-5:] if len(sorted_tfs) > 5 else []
-                    if worst_tfs:
-                        msg += "\n⚠️ *Worst TimeFrames* (by Win Rate)\n"
-                        for i, (tf, data) in enumerate(reversed(worst_tfs), 1):
-                            completed = data['wins'] + data['losses']
-                            msg += f"  {i}. {tf} - W:{data['win_rate']}% ({data['wins']}/{completed})\n"
+            # Eğer hiç trade yoksa bilgi ver
+            if total_trades == 0:
+                msg += "\n⚠️ *Not:* Henüz kapanmış işlem yok.\n"
             
-            # Eğer hiç completed trade yoksa bilgi ver
-            if completed_trades == 0:
-                msg += "\n⚠️ *Not:* Henüz tamamlanan işlem yok.\n"
-                msg += "Win/Loss oranları işlemler kapandıkça güncellenecek.\n"
-            
-            msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR"
+            msg += f"\n━━━━━━━━━━━━\n📡 Kaynak: Bitget API\n⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR"
             
             _telegram.send(msg, chat_id=chat_id)
             
@@ -540,9 +517,9 @@ def handle_status_command(chat_id):
             cache_info = f"Cache: {len(_market_cache)} entries" if _market_cache else "Cache: N/A"
             
             msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🤖 *T-TARS DURUM*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 📡 *Servisler*
 • Telegram: {services_status['telegram']}
@@ -559,9 +536,9 @@ def handle_status_command(chat_id):
 • {cache_info}
 • Response: {check_time:.0f}ms
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
             _telegram.send(msg, chat_id=chat_id)
             
@@ -579,15 +556,15 @@ def handle_balance_command(chat_id):
             bal = _exchange.get_balance()
             if bal.get('success'):
                 msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 💰 *BAKİYE*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • Toplam: ${bal['total']:,.2f}
 • Kullanılabilir: ${bal['free']:,.2f}
 • Kullanımda: ${bal.get('used', 0):,.2f}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
                 _telegram.send(msg, chat_id=chat_id)
             else:
@@ -608,13 +585,13 @@ def handle_positions_command(chat_id):
             if not pos:
                 return _telegram.send("ℹ️ Açık pozisyon yok", chat_id=chat_id)
             
-            msg = f"━━━━━━━━━━━━━━━━━━━━━━\n📊 *POZİSYONLAR* ({len(pos)})\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            msg = f"━━━━━━━━━━━━━\n📊 *POZİSYONLAR* ({len(pos)})\n━━━━━━━━━━━━━\n\n"
             for p in pos:
                 s = '🟢' if str(p['side']).upper() == 'LONG' else '🔴'
                 pl = float(p.get('unrealized_pnl', 0))
                 symbol = p['symbol'].replace('/USDT:USDT', '')
                 msg += f"{s} *{symbol}* | P/L: ${pl:+.2f}\n"
-            msg += "\n━━━━━━━━━━━━━━━━━━━━━━"
+            msg += "\n━━━━━━━━━━━━━"
             _telegram.send(msg, chat_id=chat_id)
         except Exception as e:
             _telegram.send(f"❌ Hata: {e}", chat_id=chat_id)
@@ -663,14 +640,14 @@ def handle_help_command(chat_id):
                 changelog_text = "CHANGELOG yüklenemedi"
             
             msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🤖 *T-TARS v{Config.VERSION}*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 Bitget Futures Trading Bot
 AI Engine: Claude Haiku 4.5
 
 📋 *KOMUTLAR*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 🔍 *Analiz*
 • /plan [coin] - Detaylı analiz
@@ -690,11 +667,11 @@ AI Engine: Claude Haiku 4.5
 • /startbitget - Trading başlat
 • /help - Bu menü
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 📝 *SON GÜNCELLEME*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 {changelog_text}
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
             _telegram.send(msg, chat_id=chat_id)
             
@@ -713,9 +690,9 @@ def handle_stopbitget_command(chat_id):
     global _trading_enabled
     _trading_enabled = False
     msg = """
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🔴 *TRADİNG DURDURULDU*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • Yeni emir açılmayacak
 • Claude AI değerlendirme duracak
@@ -723,7 +700,7 @@ def handle_stopbitget_command(chat_id):
 
 Tekrar başlatmak için:
 /startbitget
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
     _telegram.send(msg, chat_id=chat_id)
 
@@ -732,9 +709,9 @@ def handle_startbitget_command(chat_id):
     global _trading_enabled
     _trading_enabled = True
     msg = """
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 🔥 *LIVE MOD AKTİF*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 
 • Otomatik trading başladı
 • Claude AI karar verecek
@@ -742,7 +719,7 @@ def handle_startbitget_command(chat_id):
 
 Durdurmak için:
 /stopbitget
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━
 """
     _telegram.send(msg, chat_id=chat_id)
 

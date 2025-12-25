@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.6
+T-TARS Bitget Service v2.4.7
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.7:
+- FIX: get_pnl_history() '_signed_request' hatası düzeltildi
+- CHANGED: order-history-track endpoint kullanılıyor (Copy Trade)
+- CHANGED: achievedPL field'ından gerçek PnL hesaplanıyor
 
 v2.4.6:
 - NEW: get_pnl_history(days) - history-position'dan gerçek PnL hesaplama
@@ -521,9 +526,9 @@ class BitgetService:
 
     def get_pnl_history(self, days=30):
         """
-        v2.4.6: history-position endpoint'inden gerçek PnL hesapla
+        v2.4.6: Copy Trade order-history-track'den gerçek PnL hesapla
         
-        Endpoint: /api/v2/mix/position/history-position
+        Endpoint: /api/v2/copy/mix-trader/order-history-track
         
         Args:
             days: Kaç günlük veri çekilecek (default: 30)
@@ -532,7 +537,6 @@ class BitgetService:
             dict: {
                 'success': True/False,
                 'total_pnl': float,
-                'total_net_profit': float,
                 'positions_count': int,
                 'winning_count': int,
                 'losing_count': int
@@ -546,11 +550,11 @@ class BitgetService:
             
             logger.info(f"📊 PnL History çekiliyor (son {days} gün)...")
             
-            all_positions = []
+            all_trades = []
             end_id = None
             
-            # Pagination ile tüm pozisyonları çek (max 100 per request)
-            for _ in range(10):  # Max 10 sayfa (1000 pozisyon)
+            # Pagination ile tüm trade'leri çek (max 100 per request)
+            for _ in range(10):  # Max 10 sayfa (1000 trade)
                 params = {
                     'productType': 'USDT-FUTURES',
                     'startTime': str(start_time),
@@ -561,51 +565,52 @@ class BitgetService:
                 if end_id:
                     params['idLessThan'] = end_id
                 
-                response = self._signed_request('GET', '/api/v2/mix/position/history-position', params)
+                response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-history-track', params)
                 
                 if not response or response.get('code') != '00000':
+                    error_msg = response.get('msg', 'Unknown') if response else 'No response'
+                    logger.warning(f"⚠️ PnL History API: {error_msg}")
                     break
                     
                 data = response.get('data', {})
-                positions = data.get('list', [])
+                tracking_list = data.get('trackingList', [])
                 
-                if not positions:
+                if not tracking_list:
                     break
                     
-                all_positions.extend(positions)
+                all_trades.extend(tracking_list)
                 end_id = data.get('endId')
                 
-                if len(positions) < 100:
+                if len(tracking_list) < 100:
                     break
             
             # PnL hesapla
             total_pnl = 0.0
-            total_net_profit = 0.0
             winning_count = 0
             losing_count = 0
             
-            for pos in all_positions:
+            for trade in all_trades:
                 try:
-                    pnl = float(pos.get('pnl', 0))
-                    net_profit = float(pos.get('netProfit', 0))
+                    # achievedPL field'ı realized PnL
+                    pnl_str = trade.get('achievedPL', '0')
+                    pnl = float(pnl_str)
                     
                     total_pnl += pnl
-                    total_net_profit += net_profit
                     
-                    if net_profit > 0:
+                    if pnl > 0:
                         winning_count += 1
-                    elif net_profit < 0:
+                    elif pnl < 0:
                         losing_count += 1
                 except:
                     pass
             
-            logger.info(f"✅ PnL History ({days}d): {len(all_positions)} pozisyon, PnL: ${total_pnl:.2f}, Net: ${total_net_profit:.2f}")
+            logger.info(f"✅ PnL History ({days}d): {len(all_trades)} trade, PnL: ${total_pnl:.2f}")
             
             return {
                 'success': True,
                 'total_pnl': total_pnl,
-                'total_net_profit': total_net_profit,
-                'positions_count': len(all_positions),
+                'total_net_profit': total_pnl,  # Copy Trade'de achievedPL = net profit
+                'positions_count': len(all_trades),
                 'winning_count': winning_count,
                 'losing_count': losing_count
             }

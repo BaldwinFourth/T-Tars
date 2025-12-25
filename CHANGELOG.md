@@ -1,5 +1,17 @@
 # T-TARS Changelog
 
+## v2.4.7 (2025-12-25)
+
+### 🔧 Düzeltmeler
+- **FIX:** `get_pnl_history()` '_signed_request' hatası düzeltildi
+- **FIX:** Yanlış endpoint kullanılıyordu (history-position → order-history-track)
+
+### 🔄 Değişiklikler
+- **CHANGED:** Copy Trade API endpoint kullanılıyor (`order-history-track`)
+- **CHANGED:** `achievedPL` field'ından gerçek PnL hesaplanıyor
+
+---
+
 ## v2.4.6 (2025-12-25)
 
 ### 🔧 Düzeltmeler

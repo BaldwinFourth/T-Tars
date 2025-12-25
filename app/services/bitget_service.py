@@ -8,10 +8,6 @@ v2.4.5:
 - NEW: get_trade_history_stats() - Bitget history'den WIN/LOSS istatistikleri
 - /score komutu artik GCS yerine Bitget API'den veri cekiyor
 
-v2.4.4:
-- NEW: get_order_history_track() - Kapanmış pozisyon geçmişi
-- NEW: get_closed_position_pnl() - PnL ve WIN/LOSS bilgisi
-- Endpoint: /api/v2/copy/mix-trader/order-history-track
 
 """
 
@@ -390,9 +386,9 @@ class BitgetService:
 
     def get_trade_history_stats(self, limit=100):
         """
-        v2.4.5: Bitget Copy Trade order history'den WIN/LOSS istatistikleri
+        v2.4.5: Bitget Copy Trade order-total-detail'den WIN/LOSS istatistikleri
         
-        GCS tracking yerine direkt Bitget API'den veri çeker.
+        Endpoint: /api/v2/copy/mix-trader/order-total-detail
         
         Returns:
             dict: {
@@ -400,102 +396,52 @@ class BitgetService:
                 'total_trades': int,
                 'winning_trades': int,
                 'losing_trades': int,
-                'breakeven_trades': int,
                 'win_rate': float,
-                'total_pnl': float,
-                'coin_breakdown': {coin: {wins, losses, pnl, trades, win_rate}},
-                'trades': [{symbol, pnl, result, ...}]
+                'total_pnl': float
             }
         """
         self._require_auth()
         try:
-            params = {
-                'productType': 'USDT-FUTURES',
-                'pageSize': str(limit)
-            }
-            
-            logger.info(f"📊 Trade history stats çekiliyor (limit={limit})...")
-            response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-history-track', params=params)
+            logger.info(f"📊 Trade history stats çekiliyor (order-total-detail)...")
+            response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-total-detail')
             
             if not response or response.get('code') != '00000':
                 error_msg = response.get('msg', 'Unknown error') if response else 'No response'
                 logger.error(f"❌ Trade history stats hatası: {error_msg}")
                 return {'success': False, 'error': error_msg}
             
-            data = response.get('data')
-            tracking_list = (data.get('trackingList') or []) if data else []
+            data = response.get('data', {})
             
-            logger.info(f"📋 Trade history: {len(tracking_list)} kayıt bulundu")
+            # API response'dan değerleri al
+            total_trades = int(data.get('tradingOrderNum', 0))
+            winning_trades = int(data.get('gainNum', 0))
+            losing_trades = int(data.get('lossNum', 0))
+            win_rate = float(data.get('winRate', 0))
             
-            # İstatistik hesaplama
-            stats = {
+            # totalpl "$46.95" formatında geliyor, parse et
+            total_pnl_str = data.get('totalpl', '$0')
+            try:
+                # "$46.95" veya "-$12.34" formatını parse et
+                total_pnl_str = total_pnl_str.replace('$', '').replace(',', '')
+                total_pnl = float(total_pnl_str)
+            except:
+                total_pnl = 0.0
+            
+            completed_trades = winning_trades + losing_trades
+            breakeven_trades = total_trades - completed_trades
+            
+            logger.info(f"✅ Trade stats: {total_trades} trades, {winning_trades}W/{losing_trades}L, WR:{win_rate}%, PnL: ${total_pnl:.2f}")
+            
+            return {
                 'success': True,
-                'total_trades': 0,
-                'winning_trades': 0,
-                'losing_trades': 0,
-                'breakeven_trades': 0,
-                'win_rate': 0.0,
-                'total_pnl': 0.0,
-                'coin_breakdown': {},
-                'trades': []
+                'total_trades': total_trades,
+                'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
+                'breakeven_trades': breakeven_trades,
+                'win_rate': win_rate,
+                'total_pnl': total_pnl,
+                'coin_breakdown': {}  # Bu endpoint coin breakdown vermiyor
             }
-            
-            for order in tracking_list:
-                try:
-                    pnl = float(order.get('achievedProfits', 0))
-                    symbol = order.get('symbol', 'UNKNOWN')
-                    coin = symbol.replace('USDT', '')
-                    
-                    stats['total_trades'] += 1
-                    stats['total_pnl'] += pnl
-                    
-                    # WIN/LOSS belirleme (threshold: $0.01)
-                    if pnl > 0.01:
-                        result = 'WIN'
-                        stats['winning_trades'] += 1
-                    elif pnl < -0.01:
-                        result = 'LOSS'
-                        stats['losing_trades'] += 1
-                    else:
-                        result = 'BREAKEVEN'
-                        stats['breakeven_trades'] += 1
-                    
-                    # Coin breakdown
-                    if coin not in stats['coin_breakdown']:
-                        stats['coin_breakdown'][coin] = {'wins': 0, 'losses': 0, 'pnl': 0.0, 'trades': 0}
-                    
-                    stats['coin_breakdown'][coin]['trades'] += 1
-                    stats['coin_breakdown'][coin]['pnl'] += pnl
-                    if result == 'WIN':
-                        stats['coin_breakdown'][coin]['wins'] += 1
-                    elif result == 'LOSS':
-                        stats['coin_breakdown'][coin]['losses'] += 1
-                    
-                    # Trade detayı
-                    stats['trades'].append({
-                        'symbol': symbol,
-                        'coin': coin,
-                        'pnl': pnl,
-                        'result': result
-                    })
-                    
-                except Exception as e:
-                    logger.warning(f"Trade parse error: {e}")
-                    continue
-            
-            # Win rate hesapla
-            completed = stats['winning_trades'] + stats['losing_trades']
-            if completed > 0:
-                stats['win_rate'] = (stats['winning_trades'] / completed) * 100
-            
-            # Coin breakdown'a win_rate ekle
-            for coin, coin_data in stats['coin_breakdown'].items():
-                coin_completed = coin_data['wins'] + coin_data['losses']
-                coin_data['win_rate'] = round((coin_data['wins'] / coin_completed * 100), 1) if coin_completed > 0 else 0.0
-            
-            logger.info(f"✅ Trade stats: {stats['total_trades']} trades, {stats['winning_trades']}W/{stats['losing_trades']}L, PnL: ${stats['total_pnl']:.2f}")
-            
-            return stats
             
         except Exception as e:
             logger.error(f"❌ Trade history stats exception: {e}")

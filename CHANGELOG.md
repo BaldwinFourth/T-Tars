@@ -8,11 +8,20 @@
 
 ### Fixed
 - **CRITICAL: status PENDING bug**: Order açıldığında status FILLED olarak kaydedilmiyordu, monitor bu yüzden kapanan pozisyonları görmüyordu
+- Yanlış endpoint (`order-history-track`) düzeltildi
+- gainNum/lossNum/totalpl field'ları kullanılıyor
 
 ### Changed
 - **/score Bitget API'den çekiyor**: GCS tracking yerine direkt Bitget Copy Trade history API kullanılıyor
 - `get_trade_history_stats()` fonksiyonu eklendi (bitget_service.py)
 - WIN/LOSS artık gerçek Bitget verilerinden hesaplanıyor
+
+### Hotfix
+- Endpoint: `/api/v2/copy/mix-trader/order-total-detail`
+- API doğrudan WIN/LOSS/PnL veriyor, parse etmeye gerek yok
+
+
+
 
 ### Why This Change?
 - GCS'deki tracking sistemi `status: PENDING` bug'ı nedeniyle çalışmıyordu

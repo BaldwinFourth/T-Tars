@@ -10,6 +10,7 @@ v2.4.4:
 - NEW: Monitor'da pozisyon kapaninca PnL cekiliyor (Bitget API)
 - NEW: WIN/LOSS otomatik belirleniyor
 - NEW: Pozisyon kapaninca Telegram mesaji gonderiliyor
+- FIX: log_setup'a status:'FILLED' eklendi (PENDING bug fix)
 
 v2.4.3:
 - FIX: REPLACE handling duzeltildi (eski order cancel + yeni order)
@@ -20,30 +21,6 @@ v2.4.0:
 - UPGRADED: Strateji yeniden yapilandirildi (PDC bias, Fibo zone, Doji, OB/FVG noise filter)
 - Detaylar icin CHANGELOG.md
 
-v2.3.14:
-- NEW: Duplicate order kontrolü (tracking.check_duplicate_setup)
-- CHANGED: Order açmadan önce aynı coin+direction kontrolü
-- CHANGED: Copy Trade API trackingNo desteği
-
-v2.3.11:
-- CHANGED: Expiry logic tracking_service'e taşındı
-- CHANGED: TF bazlı expiry (5m→2h, diğerleri→4h)
-- REMOVED: ORDER_EXPIRY_HOURS sabit - artık tracking_service'de
-
-v2.3.10:
-- FIX: python_score hesaplaması düzeltildi
-- CHANGED: setup_strength hem ob_strength hem fvg_strength'den okunuyor
-
-v2.3.8:
-- FIX: MARKET_CACHE_TTL 300→1200 (20 dakika) - HTF verisi expire olmuyordu
-- DRY: Tüm threshold'lar calculators.py'den yönetiliyor
-
-v2.3.7:
-- NEW: volume_analyzer entegrasyonu (store_volume, get_volume)
-- CHANGED: Webhook hem MARKET_CACHE hem volume_analyzer'a yazar
-- ADD: cleanup_expired_volumes() çağrısı auto_analyze'da
-- ADD: Bar kapanışı timing kontrolü (5m bar + 1dk sonra çalış)
-- Detector'lar artık volume_analyzer'dan okuyabilir
 """
 
 from flask import Flask, request, jsonify
@@ -689,6 +666,7 @@ def auto_analyze():
                                     'tracking_no': exec_result.get('tracking_no'),
                                     'contracts': exec_result.get('contracts', 0),
                                     'position_usd': exec_result.get('position_usd', 0),
+                                    'status': 'FILLED',  # v2.4.5: Order açıldığında FILLED olarak işaretle
                                     'claude_action': action,
                                     'claude_confidence': confidence,
                                     'claude_reasoning': reasoning,

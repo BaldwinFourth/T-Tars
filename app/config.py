@@ -1,20 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.3.13
+T-TARS Configuration v2.4.5
 ============================
 
-v2.3.13:
-- NEW: CLOSE_ORDER_TYPE = 'limit' (market yerine limit close)
-- NEW: CLOSE_SLIPPAGE_PCT = 0.002 (%0.2 slippage)
+v2.4.5:
+- REMOVED: 30m timeframe (auto analyze ve scan kapsamından çıkarıldı)
 
-v2.3.12:
-- REMOVED: 5m timeframe (PineScript pasife alındı)
-- REMOVED: BGB/USDT (çıkarıldı)
-- ADDED: XRP/USDT, TRX/USDT (AUTO_SCAN_PAIRS'e eklendi)
-
-v2.3.8:
-- NEW: MARKET_CACHE_TTL = 1200 (20 dakika) - HTF verileri için
-- CHANGED: STOP_DISTANCE_MAX = 0.025 (%2.5) - Claude prompt ile tutarlı
 """
 
 import os
@@ -22,7 +13,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.3.13"""
+    """T-TARS Configuration v2.4.5"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -78,9 +69,9 @@ class Config:
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
     
     # ============================================
-    # TIMEFRAMES (v2.3.12 - 5m kaldırıldı)
+    # TIMEFRAMES (v2.4.5 - 30m kaldırıldı)
     # ============================================
-    TIMEFRAMES = ['1h', '30m', '15m']
+    TIMEFRAMES = ['1h', '15m']
     
     # ============================================
     # TRADING PAIRS (v2.3.12)

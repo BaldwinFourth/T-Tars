@@ -1,4 +1,28 @@
-# T-TARS Trading Bot - CHANGELOG
+# T-TARS Changelog
+
+## v2.4.6 (2025-12-25)
+
+### 🔧 Düzeltmeler
+- **FIX:** `/score` haftalık/aylık PnL boş geliyordu (lastWeekProfitList profit share, trade PnL değil)
+
+### ✨ Yeni Özellikler
+- **NEW:** `get_pnl_history(days)` - history-position endpoint'inden gerçek PnL hesaplama
+- **NEW:** `/score`'da Günlük PnL gösterimi
+
+### 🔄 Değişiklikler
+- **CHANGED:** Günlük/Haftalık/Aylık PnL artık `history-position` endpoint'inden çekiliyor
+- **CHANGED:** Her period için gerçek pozisyon netProfit değerleri toplanıyor
+
+### 📊 /score Yeni Format
+```
+📊 Performans
+• Günlük: +$XX.XX
+• Haftalık: -$XXX.XX
+• Aylık: -$XXX.XX
+• Toplam: +$XXX.XX
+```
+
+---
 
 ## v2.4.5 (2025-12-25)
 

@@ -1,14 +1,57 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.5
+T-TARS Bitget Service v2.4.6
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.6:
+- NEW: get_pnl_history(days) - history-position'dan gerçek PnL hesaplama
+- CHANGED: get_trade_history_stats() - Günlük/Haftalık/Aylık PnL artık history-position'dan
+- FIX: lastWeekProfitList/lastMonthProfitList boş geliyordu (profit share, trade PnL değil)
 
 v2.4.5:
 - NEW: get_trade_history_stats() - Bitget history'den WIN/LOSS istatistikleri
 - /score komutu artik GCS yerine Bitget API'den veri cekiyor
 
+v2.4.4:
+- NEW: get_order_history_track() - Kapanmış pozisyon geçmişi
+- NEW: get_closed_position_pnl() - PnL ve WIN/LOSS bilgisi
+- Endpoint: /api/v2/copy/mix-trader/order-history-track
 
+v2.4.3:
+- FIX: TP/SL preset parametreleri duzeltildi (Bitget API doc)
+- CHANGED: stopSurplus/stopLoss → presetStopSurplusPrice/presetStopLossPrice
+
+v2.4.2:
+- FIX: Hedge mode params duzeltildi (Bitget API doc'a gore)
+- CHANGED: holdSide kaldirildi, tradeSide='open'/'close' kullaniliyor
+- side=buy (LONG), side=sell (SHORT), tradeSide=open/close
+
+v2.4.1:
+- FIX: Hedge mode icin holdSide parametresi eklendi
+- FIX: "unilateral position" hatasi (40774) duzeltildi
+
+v2.4.0:
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
+- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
+
+v2.3.14:
+- NEW: place_copy_trade_order() - Copy Trade API ile order aç
+- CHANGED: place_order_with_tp_sl() → Copy Trade API kullanıyor
+- NEW: trackingNo response'da döndürülüyor
+- FIXED: trackingNo:None sorunu çözüldü
+
+v2.3.13:
+- NEW: close_position() → Limit order desteği (market yerine)
+- NEW: Config.CLOSE_ORDER_TYPE ('limit' / 'market')
+- NEW: Config.CLOSE_SLIPPAGE_PCT (%0.2 default)
+- Slippage: LONG close → price * (1 - slippage), SHORT close → price * (1 + slippage)
+
+v2.3.8:
+- CHANGED: MARKET_CACHE_TTL → Config.MARKET_CACHE_TTL (DRY)
+- CHANGED: Volume spike/strength thresholds → calculators.py'den import (DRY)
 """
 
 import ccxt
@@ -386,9 +429,10 @@ class BitgetService:
 
     def get_trade_history_stats(self, limit=100):
         """
-        v2.4.5: Bitget Copy Trade order-total-detail'den WIN/LOSS istatistikleri
+        v2.4.6: Bitget API'den WIN/LOSS istatistikleri + History PnL
         
-        Endpoint: /api/v2/copy/mix-trader/order-total-detail
+        - order-total-detail: Win/Loss sayıları, winRate
+        - history-position: Haftalık/Aylık gerçek PnL
         
         Returns:
             dict: {
@@ -397,12 +441,17 @@ class BitgetService:
                 'winning_trades': int,
                 'losing_trades': int,
                 'win_rate': float,
-                'total_pnl': float
+                'total_pnl': float,
+                'weekly_pnl': float,
+                'monthly_pnl': float,
+                'daily_pnl': float
             }
         """
         self._require_auth()
         try:
-            logger.info(f"📊 Trade history stats çekiliyor (order-total-detail)...")
+            logger.info(f"📊 Trade history stats çekiliyor...")
+            
+            # 1. order-total-detail'den win/loss sayıları
             response = self._copy_trade_request('GET', '/api/v2/copy/mix-trader/order-total-detail')
             
             if not response or response.get('code') != '00000':
@@ -418,19 +467,39 @@ class BitgetService:
             losing_trades = int(data.get('lossNum', 0))
             win_rate = float(data.get('winRate', 0))
             
-            # totalpl "$46.95" formatında geliyor, parse et
+            # totalpl "$46.95" formatında geliyor, parse et (tüm zamanların toplamı)
             total_pnl_str = data.get('totalpl', '$0')
             try:
-                # "$46.95" veya "-$12.34" formatını parse et
                 total_pnl_str = total_pnl_str.replace('$', '').replace(',', '')
                 total_pnl = float(total_pnl_str)
             except:
                 total_pnl = 0.0
             
+            # 2. history-position'dan gerçek PnL hesapla
+            daily_pnl = 0.0
+            weekly_pnl = 0.0
+            monthly_pnl = 0.0
+            
+            # Günlük PnL (1 gün)
+            daily_result = self.get_pnl_history(days=1)
+            if daily_result.get('success'):
+                daily_pnl = daily_result.get('total_net_profit', 0)
+            
+            # Haftalık PnL (7 gün)
+            weekly_result = self.get_pnl_history(days=7)
+            if weekly_result.get('success'):
+                weekly_pnl = weekly_result.get('total_net_profit', 0)
+            
+            # Aylık PnL (30 gün)
+            monthly_result = self.get_pnl_history(days=30)
+            if monthly_result.get('success'):
+                monthly_pnl = monthly_result.get('total_net_profit', 0)
+            
             completed_trades = winning_trades + losing_trades
             breakeven_trades = total_trades - completed_trades
             
-            logger.info(f"✅ Trade stats: {total_trades} trades, {winning_trades}W/{losing_trades}L, WR:{win_rate}%, PnL: ${total_pnl:.2f}")
+            logger.info(f"✅ Trade stats: {total_trades} trades, {winning_trades}W/{losing_trades}L, WR:{win_rate}%")
+            logger.info(f"💰 PnL - Daily: ${daily_pnl:.2f}, Weekly: ${weekly_pnl:.2f}, Monthly: ${monthly_pnl:.2f}, Total: ${total_pnl:.2f}")
             
             return {
                 'success': True,
@@ -440,11 +509,109 @@ class BitgetService:
                 'breakeven_trades': breakeven_trades,
                 'win_rate': win_rate,
                 'total_pnl': total_pnl,
-                'coin_breakdown': {}  # Bu endpoint coin breakdown vermiyor
+                'daily_pnl': daily_pnl,
+                'weekly_pnl': weekly_pnl,
+                'monthly_pnl': monthly_pnl,
+                'coin_breakdown': {}
             }
             
         except Exception as e:
             logger.error(f"❌ Trade history stats exception: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_pnl_history(self, days=30):
+        """
+        v2.4.6: history-position endpoint'inden gerçek PnL hesapla
+        
+        Endpoint: /api/v2/mix/position/history-position
+        
+        Args:
+            days: Kaç günlük veri çekilecek (default: 30)
+            
+        Returns:
+            dict: {
+                'success': True/False,
+                'total_pnl': float,
+                'total_net_profit': float,
+                'positions_count': int,
+                'winning_count': int,
+                'losing_count': int
+            }
+        """
+        self._require_auth()
+        try:
+            # Zaman aralığını hesapla
+            now = int(time.time() * 1000)
+            start_time = now - (days * 24 * 60 * 60 * 1000)
+            
+            logger.info(f"📊 PnL History çekiliyor (son {days} gün)...")
+            
+            all_positions = []
+            end_id = None
+            
+            # Pagination ile tüm pozisyonları çek (max 100 per request)
+            for _ in range(10):  # Max 10 sayfa (1000 pozisyon)
+                params = {
+                    'productType': 'USDT-FUTURES',
+                    'startTime': str(start_time),
+                    'endTime': str(now),
+                    'limit': '100'
+                }
+                
+                if end_id:
+                    params['idLessThan'] = end_id
+                
+                response = self._signed_request('GET', '/api/v2/mix/position/history-position', params)
+                
+                if not response or response.get('code') != '00000':
+                    break
+                    
+                data = response.get('data', {})
+                positions = data.get('list', [])
+                
+                if not positions:
+                    break
+                    
+                all_positions.extend(positions)
+                end_id = data.get('endId')
+                
+                if len(positions) < 100:
+                    break
+            
+            # PnL hesapla
+            total_pnl = 0.0
+            total_net_profit = 0.0
+            winning_count = 0
+            losing_count = 0
+            
+            for pos in all_positions:
+                try:
+                    pnl = float(pos.get('pnl', 0))
+                    net_profit = float(pos.get('netProfit', 0))
+                    
+                    total_pnl += pnl
+                    total_net_profit += net_profit
+                    
+                    if net_profit > 0:
+                        winning_count += 1
+                    elif net_profit < 0:
+                        losing_count += 1
+                except:
+                    pass
+            
+            logger.info(f"✅ PnL History ({days}d): {len(all_positions)} pozisyon, PnL: ${total_pnl:.2f}, Net: ${total_net_profit:.2f}")
+            
+            return {
+                'success': True,
+                'total_pnl': total_pnl,
+                'total_net_profit': total_net_profit,
+                'positions_count': len(all_positions),
+                'winning_count': winning_count,
+                'losing_count': losing_count
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ PnL History exception: {e}")
             return {'success': False, 'error': str(e)}
 
     def check_connection(self):

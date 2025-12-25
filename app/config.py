@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.4.5
+T-TARS Configuration v2.4.8
 ============================
+
+v2.4.8:
+- REMOVED: BTCUSDT auto-scan'den çıkarıldı
+- ADDED: NIGHTUSDT, BCHUSDT, DOGEUSDT eklendi
 
 v2.4.5:
 - REMOVED: 30m timeframe (auto analyze ve scan kapsamından çıkarıldı)
@@ -13,7 +17,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.4.5"""
+    """T-TARS Configuration v2.4.8"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -74,12 +78,11 @@ class Config:
     TIMEFRAMES = ['1h', '15m']
     
     # ============================================
-    # TRADING PAIRS (v2.3.12)
+    # TRADING PAIRS (v2.4.8 - BTC çıktı, NIGHT/BCH/DOGE eklendi)
     # ============================================
     
-    # Auto-scan listesi (v2.3.12: BGB çıktı, XRP/TRX eklendi)
+    # Auto-scan listesi (v2.4.8: BTC çıktı, NIGHT/BCH/DOGE eklendi)
     AUTO_SCAN_PAIRS = [
-        'BTC/USDT:USDT',   # Bitcoin
         'ETH/USDT:USDT',   # Ethereum
         'SOL/USDT:USDT',   # Solana
         'BNB/USDT:USDT',   # BNB
@@ -87,6 +90,9 @@ class Config:
         'JUP/USDT:USDT',   # Jupiter
         'XRP/USDT:USDT',   # Ripple
         'TRX/USDT:USDT',   # Tron
+        'NIGHT/USDT:USDT', # Night (yeni)
+        'BCH/USDT:USDT',   # Bitcoin Cash (yeni)
+        'DOGE/USDT:USDT',  # Dogecoin (yeni)
     ]
     
     # Manuel /plan için (genişletilmiş liste)
@@ -97,7 +103,7 @@ class Config:
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
         'PUMP/USDT:USDT', 'BCH/USDT:USDT',
-        'XAU/USDT:USDT', 'FLOKI/USDT:USDT',
+        'XAU/USDT:USDT', 'FLOKI/USDT:USDT', 'NIGHT/USDT:USDT',
     ]
     
     # ============================================

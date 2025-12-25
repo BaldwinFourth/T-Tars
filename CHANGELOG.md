@@ -1,5 +1,17 @@
 # T-TARS Changelog
 
+## v2.4.8 (2024-12-25)
+
+### Changed
+- **AUTO_SCAN_PAIRS:** BTCUSDT çıkarıldı
+- **AUTO_SCAN_PAIRS:** NIGHTUSDT, BCHUSDT, DOGEUSDT eklendi
+- **PineScript v13:** 1h ve 15m scanner'lar güncellendi
+
+### Coin Listesi (10 coin)
+- ETH, SOL, BNB, XAU, JUP, XRP, TRX, NIGHT, BCH, DOGE
+
+---
+
 ## v2.4.7 (2025-12-25)
 
 ### 🔧 Düzeltmeler

@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.4.10
+T-TARS Claude Service v2.4.11
 ==============================
 Claude AI API wrapper for market analysis and setup evaluation.
+
+v2.4.11:
+- NEW: Stop Sanity Check (LONG: Stop<Entry<TP, SHORT: TP<Entry<Stop)
+- NEW: Entry/Current fark kontrolü (>1% → SKIP)
+- Limit order instant fill sorunu için ek güvenlik katmanı
 
 v2.4.10:
 - CHANGED: TP1/TP2 sistemi → Tek TP sistemi (TP_MULTIPLIER=3.0)
@@ -53,7 +58,7 @@ def format_price_display(price):
 
 
 class ClaudeService:
-    """Claude Haiku 4.5 API Service - v2.4.10 (AI Decision Engine + Tek TP Sistemi)"""
+    """Claude Haiku 4.5 API Service - v2.4.11 (AI Decision Engine + Safety Checks)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -71,7 +76,8 @@ class ClaudeService:
     STOP_AGGRESSIVE_TARGET = 1.8  # 2-2.5% arası için hedef
     AGGRESSIVE_RR = 3.0     # 2-2.5% arası için R:R
     
-    # v2.4.10: Tek TP (calculators'tan import edilen TP_MULTIPLIER kullanılıyor)
+    # v2.4.11: Entry/Current fark limiti
+    ENTRY_CURRENT_MAX_DIFF = 0.01  # %1 (limit order instant fill önleme)
     
     def __init__(self):
         self.client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
@@ -80,7 +86,7 @@ class ClaudeService:
         self.STOP_MIN_PCT = Config.STOP_DISTANCE_MIN * 100      # 0.008 → 0.8
         self.STOP_ADJUST_MAX = Config.STOP_DISTANCE_MAX * 100   # 0.025 → 2.5
         
-        logger.info(f"✅ Claude Service v2.4.10 initialized: {Config.CLAUDE_MODEL} | "
+        logger.info(f"✅ Claude Service v2.4.11 initialized: {Config.CLAUDE_MODEL} | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
     
@@ -281,7 +287,7 @@ class ClaudeService:
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
-        v2.4.10: AI Setup Değerlendirmesi - Tek TP Sistemi
+        v2.4.11: AI Setup Değerlendirmesi - Tek TP Sistemi + Safety Checks
         
         Kritik veri eksikse → LOG + SKIP (hardcoded default YOK!)
         
@@ -343,14 +349,6 @@ class ClaudeService:
                 return self._skip_response(f"{pair}: tp_price eksik")
             tp_price = float(tp_price)
             
-            # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)
-            if direction.upper() == 'LONG' and tp_price <= entry_price:
-                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) <= Entry ({entry_price}) - LONG için geçersiz!")
-                return self._skip_response(f"{pair}: TP entry'den düşük veya eşit (muhtemelen ATR=0)")
-            if direction.upper() == 'SHORT' and tp_price >= entry_price:
-                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) >= Entry ({entry_price}) - SHORT için geçersiz!")
-                return self._skip_response(f"{pair}: TP entry'den yüksek veya eşit (muhtemelen ATR=0)")
-            
             # R:R RATIO
             rr_ratio = setup_data.get('rr_ratio')
             if rr_ratio is None:
@@ -388,6 +386,55 @@ class ClaudeService:
                 logger.error(f"❌ SKIP [{pair}]: 'current_price' eksik!")
                 return self._skip_response(f"{pair}: current_price eksik")
             current_price = float(current_price)
+            
+            # ============================================
+            # v2.4.11: STOP SANİTY CHECK
+            # ============================================
+            is_long = direction.upper() == 'LONG'
+            
+            # LONG: Stop < Entry < TP olmalı
+            if is_long:
+                if not (stop_price < entry_price < tp_price):
+                    logger.error(f"❌ SKIP [{pair}]: LONG sanity fail! "
+                                f"Stop({format_price_display(stop_price)}) < "
+                                f"Entry({format_price_display(entry_price)}) < "
+                                f"TP({format_price_display(tp_price)}) değil!")
+                    return self._skip_response(f"{pair}: LONG stop/entry/TP sırası yanlış")
+            
+            # SHORT: TP < Entry < Stop olmalı
+            else:
+                if not (tp_price < entry_price < stop_price):
+                    logger.error(f"❌ SKIP [{pair}]: SHORT sanity fail! "
+                                f"TP({format_price_display(tp_price)}) < "
+                                f"Entry({format_price_display(entry_price)}) < "
+                                f"Stop({format_price_display(stop_price)}) değil!")
+                    return self._skip_response(f"{pair}: SHORT stop/entry/TP sırası yanlış")
+            
+            # ============================================
+            # v2.4.11: ENTRY/CURRENT PRICE FARKI KONTROLÜ
+            # ============================================
+            price_diff_pct = abs(current_price - entry_price) / entry_price if entry_price > 0 else 0
+            
+            # %1'den fazla fark varsa SKIP (limit order hemen fill olur, stop yanlış kalır)
+            if price_diff_pct > self.ENTRY_CURRENT_MAX_DIFF:
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Entry/Current fark %{price_diff_pct*100:.2f} > %{self.ENTRY_CURRENT_MAX_DIFF*100}")
+                logger.warning(f"   Entry: {format_price_display(entry_price)} | Current: {format_price_display(current_price)}")
+                return {
+                    'action': 'SKIP',
+                    'confidence': 100,
+                    'reasoning': f'Entry/Current fark cok buyuk: %{price_diff_pct*100:.1f}',
+                    'adjustments': {}
+                }
+            
+            # ============================================
+            # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)
+            # ============================================
+            if is_long and tp_price <= entry_price:
+                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) <= Entry ({entry_price}) - LONG için geçersiz!")
+                return self._skip_response(f"{pair}: TP entry'den düşük veya eşit (muhtemelen ATR=0)")
+            if not is_long and tp_price >= entry_price:
+                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) >= Entry ({entry_price}) - SHORT için geçersiz!")
+                return self._skip_response(f"{pair}: TP entry'den yüksek veya eşit (muhtemelen ATR=0)")
             
             # PDC (Previous Day Candle)
             pdc = market_data.get('previous_day', {})
@@ -459,7 +506,7 @@ class ClaudeService:
                 return {
                     'action': 'SKIP',
                     'confidence': 100,
-                    'reasoning': f'Stop çok uzak: %{original_stop_pct:.2f} >= %{self.STOP_ADJUST_MAX} maximum',
+                    'reasoning': f'Stop cok uzak: %{original_stop_pct:.2f} >= %{self.STOP_ADJUST_MAX} maximum',
                     'adjustments': {}
                 }
             
@@ -483,6 +530,7 @@ class ClaudeService:
    Direction: {direction} | TF: {timeframe} | Type: {setup_type}
    Entry: {entry_price} | Stop: {stop_price} | TP: {tp_price}
    R:R: {rr_ratio:.2f} | Stop%: {stop_distance_pct:.2f}%
+   Current: {current_price} | Diff: {price_diff_pct*100:.2f}%
    Adjusted: {adjustment_result['adjusted']} | Type: {adjustment_result['adjustment_type']}
    Confidence: {confidence_label} | Score: {strength_score}
    PDC Bias: {pdc_bias} | ATR: {atr} | Vol: {volume_spike:.2f}x
@@ -498,7 +546,7 @@ class ClaudeService:
                 return {
                     'action': 'SKIP',
                     'confidence': 100,
-                    'reasoning': f'RR çok düşük: {rr_ratio:.2f} < {MIN_RR_RATIO} minimum',
+                    'reasoning': f'RR cok dusuk: {rr_ratio:.2f} < {MIN_RR_RATIO} minimum',
                     'adjustments': {}
                 }
             

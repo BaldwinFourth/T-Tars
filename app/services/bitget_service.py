@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.10
+T-TARS Bitget Service v2.4.11
 =============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.11:
+- NEW: get_pnl_history() coin bazlı PnL agregasyonu
+- NEW: get_trade_history_stats() worst_coin/best_coin döndürüyor
+- NEW: Coin breakdown istatistikleri
 
 v2.4.10:
 - CHANGED: tp1_price → tp_price (tek TP sistemi)
@@ -18,26 +23,6 @@ v2.4.7:
 - FIX: get_pnl_history() '_signed_request' hatası düzeltildi
 - CHANGED: order-history-track endpoint kullanılıyor (Copy Trade)
 - CHANGED: achievedPL field'ından gerçek PnL hesaplanıyor
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
-- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
-
-v2.3.14:
-- NEW: place_copy_trade_order() - Copy Trade API ile order aç
-- CHANGED: place_order_with_tp_sl() → Copy Trade API kullanıyor
-- NEW: trackingNo response'da döndürülüyor
-- FIXED: trackingNo:None sorunu çözüldü
-
-v2.3.13:
-- NEW: close_position() → Limit order desteği (market yerine)
-- NEW: Config.CLOSE_ORDER_TYPE ('limit' / 'market')
-- NEW: Config.CLOSE_SLIPPAGE_PCT (%0.2 default)
-- Slippage: LONG close → price * (1 - slippage), SHORT close → price * (1 + slippage)
-
-v2.3.8:
-- CHANGED: MARKET_CACHE_TTL → Config.MARKET_CACHE_TTL (DRY)
-- CHANGED: Volume spike/strength thresholds → calculators.py'den import (DRY)
 """
 
 import ccxt
@@ -102,7 +87,7 @@ def round_price_to_precision(price, precision):
 
 
 class BitgetService:
-    """Bitget Borsa Servisi - v2.4.5 (Hedge Mode + Copy Trade API + Trade Stats)"""
+    """Bitget Borsa Servisi - v2.4.11 (Hedge Mode + Copy Trade API + Coin Stats)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d', '4S': '4h', '4h': '4h',
@@ -304,12 +289,6 @@ class BitgetService:
         v2.4.4: Kapanmış Copy Trade pozisyonlarının geçmişi
         
         Endpoint: /api/v2/copy/mix-trader/order-history-track
-        
-        Returns:
-            dict: {
-                'success': True/False,
-                'orders': [{trackingNo, symbol, posSide, achievedPL, ...}]
-            }
         """
         self._require_auth()
         try:
@@ -332,7 +311,6 @@ class BitgetService:
                 tracking_list = data.get('trackingList') or []
                 logger.info(f"✅ Copy Trade history: {len(tracking_list)} kayıt")
                 
-                # Belirli trackingNo aranıyorsa filtrele
                 if tracking_no:
                     for order in tracking_list:
                         if str(order.get('trackingNo')) == str(tracking_no):
@@ -351,18 +329,6 @@ class BitgetService:
     def get_closed_position_pnl(self, tracking_no):
         """
         v2.4.4: Kapanmış pozisyonun PnL bilgisini al
-        
-        Returns:
-            dict: {
-                'success': True/False,
-                'pnl': float,
-                'result': 'WIN'/'LOSS'/'BREAKEVEN',
-                'entry_price': float,
-                'close_price': float,
-                'fees': float,
-                'symbol': str,
-                'side': str
-            }
         """
         try:
             result = self.get_order_history_track(tracking_no=tracking_no)
@@ -377,10 +343,8 @@ class BitgetService:
             
             order = orders[0]
             
-            # Debug: API response field'larını logla
             logger.info(f"📋 API Response keys: {list(order.keys())}")
             
-            # PnL bilgilerini çek
             pnl = float(order.get('achievedPL', 0))
             entry_price = float(order.get('openPriceAvg', 0))
             close_price = float(order.get('closePriceAvg', 0))
@@ -388,7 +352,6 @@ class BitgetService:
             close_fee = float(order.get('closeFee', 0))
             total_fees = open_fee + close_fee
             
-            # WIN/LOSS/BREAKEVEN belirle
             if pnl > 0.01:
                 trade_result = 'WIN'
             elif pnl < -0.01:
@@ -418,10 +381,10 @@ class BitgetService:
 
     def get_trade_history_stats(self, limit=100):
         """
-        v2.4.6: Bitget API'den WIN/LOSS istatistikleri + History PnL
+        v2.4.11: Bitget API'den WIN/LOSS istatistikleri + Coin Breakdown
         
         - order-total-detail: Win/Loss sayıları, winRate
-        - history-position: Haftalık/Aylık gerçek PnL
+        - history-position: Haftalık/Aylık gerçek PnL + Coin bazlı breakdown
         
         Returns:
             dict: {
@@ -433,7 +396,10 @@ class BitgetService:
                 'total_pnl': float,
                 'weekly_pnl': float,
                 'monthly_pnl': float,
-                'daily_pnl': float
+                'daily_pnl': float,
+                'worst_coin': {'symbol': str, 'pnl': float, 'trades': int},
+                'best_coin': {'symbol': str, 'pnl': float, 'trades': int},
+                'coin_breakdown': dict
             }
         """
         self._require_auth()
@@ -456,7 +422,7 @@ class BitgetService:
             losing_trades = int(data.get('lossNum', 0))
             win_rate = float(data.get('winRate', 0))
             
-            # totalpl "$46.95" formatında geliyor, parse et (tüm zamanların toplamı)
+            # totalpl "$46.95" formatında geliyor, parse et
             total_pnl_str = data.get('totalpl', '$0')
             try:
                 total_pnl_str = total_pnl_str.replace('$', '').replace(',', '')
@@ -464,10 +430,13 @@ class BitgetService:
             except:
                 total_pnl = 0.0
             
-            # 2. history-position'dan gerçek PnL hesapla
+            # 2. history-position'dan gerçek PnL + coin breakdown
             daily_pnl = 0.0
             weekly_pnl = 0.0
             monthly_pnl = 0.0
+            coin_breakdown = {}
+            worst_coin = None
+            best_coin = None
             
             # Günlük PnL (1 gün)
             daily_result = self.get_pnl_history(days=1)
@@ -479,16 +448,48 @@ class BitgetService:
             if weekly_result.get('success'):
                 weekly_pnl = weekly_result.get('total_net_profit', 0)
             
-            # Aylık PnL (30 gün)
+            # v2.4.11: Aylık PnL (30 gün) + coin breakdown
             monthly_result = self.get_pnl_history(days=30)
             if monthly_result.get('success'):
                 monthly_pnl = monthly_result.get('total_net_profit', 0)
+                coin_breakdown = monthly_result.get('coin_breakdown', {})
+                
+                # Worst/Best coin hesapla
+                if coin_breakdown:
+                    sorted_coins = sorted(coin_breakdown.items(), key=lambda x: x[1]['total_pnl'])
+                    
+                    # En kötü (en düşük PnL)
+                    if sorted_coins:
+                        worst_symbol, worst_data = sorted_coins[0]
+                        worst_coin = {
+                            'symbol': worst_symbol.replace('USDT', ''),
+                            'pnl': worst_data['total_pnl'],
+                            'trades': worst_data['trades'],
+                            'wins': worst_data['wins'],
+                            'losses': worst_data['losses']
+                        }
+                    
+                    # En iyi (en yüksek PnL)
+                    if sorted_coins:
+                        best_symbol, best_data = sorted_coins[-1]
+                        best_coin = {
+                            'symbol': best_symbol.replace('USDT', ''),
+                            'pnl': best_data['total_pnl'],
+                            'trades': best_data['trades'],
+                            'wins': best_data['wins'],
+                            'losses': best_data['losses']
+                        }
             
             completed_trades = winning_trades + losing_trades
             breakeven_trades = total_trades - completed_trades
             
             logger.info(f"✅ Trade stats: {total_trades} trades, {winning_trades}W/{losing_trades}L, WR:{win_rate}%")
-            logger.info(f"💰 PnL - Daily: ${daily_pnl:.2f}, Weekly: ${weekly_pnl:.2f}, Monthly: ${monthly_pnl:.2f}, Total: ${total_pnl:.2f}")
+            logger.info(f"💰 PnL - Daily: ${daily_pnl:.2f}, Weekly: ${weekly_pnl:.2f}, Monthly: ${monthly_pnl:.2f}")
+            
+            if worst_coin:
+                logger.info(f"🔴 Worst: {worst_coin['symbol']} ${worst_coin['pnl']:.2f}")
+            if best_coin:
+                logger.info(f"🟢 Best: {best_coin['symbol']} ${best_coin['pnl']:.2f}")
             
             return {
                 'success': True,
@@ -501,7 +502,9 @@ class BitgetService:
                 'daily_pnl': daily_pnl,
                 'weekly_pnl': weekly_pnl,
                 'monthly_pnl': monthly_pnl,
-                'coin_breakdown': {}
+                'worst_coin': worst_coin,
+                'best_coin': best_coin,
+                'coin_breakdown': coin_breakdown
             }
             
         except Exception as e:
@@ -510,7 +513,7 @@ class BitgetService:
 
     def get_pnl_history(self, days=30):
         """
-        v2.4.6: Copy Trade order-history-track'den gerçek PnL hesapla
+        v2.4.11: Copy Trade order-history-track'den gerçek PnL + Coin Breakdown
         
         Endpoint: /api/v2/copy/mix-trader/order-history-track
         
@@ -521,9 +524,14 @@ class BitgetService:
             dict: {
                 'success': True/False,
                 'total_pnl': float,
+                'total_net_profit': float,
                 'positions_count': int,
                 'winning_count': int,
-                'losing_count': int
+                'losing_count': int,
+                'coin_breakdown': {
+                    'BTCUSDT': {'total_pnl': float, 'trades': int, 'wins': int, 'losses': int},
+                    ...
+                }
             }
         """
         self._require_auth()
@@ -568,16 +576,18 @@ class BitgetService:
                 if len(tracking_list) < 100:
                     break
             
-            # PnL hesapla
+            # PnL hesapla + Coin breakdown
             total_pnl = 0.0
             winning_count = 0
             losing_count = 0
+            coin_breakdown = {}  # v2.4.11: Coin bazlı agregasyon
             
             for trade in all_trades:
                 try:
                     # achievedPL field'ı realized PnL
                     pnl_str = trade.get('achievedPL', '0')
                     pnl = float(pnl_str)
+                    symbol = trade.get('symbol', 'UNKNOWN')
                     
                     total_pnl += pnl
                     
@@ -585,10 +595,28 @@ class BitgetService:
                         winning_count += 1
                     elif pnl < 0:
                         losing_count += 1
-                except:
+                    
+                    # v2.4.11: Coin bazlı agregasyon
+                    if symbol not in coin_breakdown:
+                        coin_breakdown[symbol] = {
+                            'total_pnl': 0.0,
+                            'trades': 0,
+                            'wins': 0,
+                            'losses': 0
+                        }
+                    
+                    coin_breakdown[symbol]['total_pnl'] += pnl
+                    coin_breakdown[symbol]['trades'] += 1
+                    if pnl > 0:
+                        coin_breakdown[symbol]['wins'] += 1
+                    elif pnl < 0:
+                        coin_breakdown[symbol]['losses'] += 1
+                        
+                except Exception as e:
+                    logger.warning(f"Trade parse error: {e}")
                     pass
             
-            logger.info(f"✅ PnL History ({days}d): {len(all_trades)} trade, PnL: ${total_pnl:.2f}")
+            logger.info(f"✅ PnL History ({days}d): {len(all_trades)} trade, PnL: ${total_pnl:.2f}, Coins: {len(coin_breakdown)}")
             
             return {
                 'success': True,
@@ -596,7 +624,8 @@ class BitgetService:
                 'total_net_profit': total_pnl,  # Copy Trade'de achievedPL = net profit
                 'positions_count': len(all_trades),
                 'winning_count': winning_count,
-                'losing_count': losing_count
+                'losing_count': losing_count,
+                'coin_breakdown': coin_breakdown  # v2.4.11: Coin breakdown eklendi
             }
             
         except Exception as e:
@@ -742,7 +771,6 @@ class BitgetService:
             pdc = self.get_previous_day_candle(symbol)
             fibo = self.calculate_fibonacci(symbol)
             
-            # v2.4.0: Daily OHLCV (PDC bias + Doji kontrolu icin)
             daily_ohlcv = self.get_ohlcv(symbol, '1d', 10)
             if not daily_ohlcv:
                 daily_ohlcv = []
@@ -800,7 +828,6 @@ class BitgetService:
                             'trend': 'unknown', 'source': 'no_cache'
                         }
                     
-                    # v2.4.0: scan fonksiyonlarina atr ve current_price eklendi
                     tf_atr = atr_data.get(api_tf, 0)
                     order_blocks[api_tf] = scan_order_blocks(ohlcv, api_tf, atr=tf_atr, current_price=current_price)
                     fair_value_gaps[api_tf] = scan_fair_value_gaps(ohlcv, api_tf, atr=tf_atr, current_price=current_price)
@@ -820,7 +847,7 @@ class BitgetService:
                 'current_date': now.strftime('%Y-%m-%d'),
                 'current_time': now.strftime('%H:%M:%S'),
                 'previous_day': pdc,
-                'daily_ohlcv': daily_ohlcv,  # v2.4.0: PDC bias + Doji icin
+                'daily_ohlcv': daily_ohlcv,
                 'fibonacci': fibo,
                 'atr': atr_data,
                 'volume': volume_data,
@@ -888,26 +915,6 @@ class BitgetService:
     def place_copy_trade_order(self, symbol, side, contracts, entry_price, tp_price=None, sl_price=None):
         """
         v2.4.0: Normal CCXT create_order + sonradan trackingNo sorgula
-        
-        Elite Trader Copy Trade API key ile normal order acilinca,
-        Bitget otomatik olarak takipcilere kopyalar.
-        trackingNo sonradan find_tracking_no_by_symbol ile alinir.
-        
-        Args:
-            symbol: Trading pair (BTC/USDT:USDT)
-            side: 'buy' (LONG) veya 'sell' (SHORT)
-            contracts: Kontrat sayisi
-            entry_price: Limit order fiyati
-            tp_price: Take profit fiyati (opsiyonel)
-            sl_price: Stop loss fiyati (opsiyonel)
-        
-        Returns:
-            dict: {
-                'success': True/False,
-                'tracking_no': str,
-                'order_id': str,
-                ...
-            }
         """
         self._require_auth()
         try:
@@ -917,15 +924,11 @@ class BitgetService:
             precision = self.get_price_precision(symbol)
             entry_rounded = round_price_to_precision(entry_price, precision)
             
-            # CCXT order params - Hedge mode (Bitget API doc)
-            # side=buy → LONG, side=sell → SHORT
-            # tradeSide=open → pozisyon aç (hedge mode'da zorunlu)
             params = {
                 'marginMode': 'cross',
-                'tradeSide': 'open',  # v2.4.2: Hedge mode için zorunlu
+                'tradeSide': 'open',
             }
             
-            # TP/SL preset (Bitget API doc: presetStopSurplusPrice, presetStopLossPrice)
             if tp_price and tp_price > 0:
                 tp_rounded = round_price_to_precision(tp_price, precision)
                 params['presetStopSurplusPrice'] = str(tp_rounded)
@@ -939,7 +942,6 @@ class BitgetService:
             if tp_price:
                 logger.info(f"   TP: {format_price_display(tp_price)} | SL: {format_price_display(sl_price)}")
             
-            # CCXT create_order (limit order)
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='limit',
@@ -953,11 +955,10 @@ class BitgetService:
                 order_id = order.get('id')
                 logger.info(f"Order Basarili! orderId: {order_id}")
                 
-                # trackingNo'yu bul (Copy Trade icin)
                 tracking_no = None
                 try:
                     import time
-                    time.sleep(1)  # API'nin islemesi icin kisa bekle
+                    time.sleep(1)
                     tracking_no = self.find_tracking_no_by_symbol(symbol)
                     if tracking_no:
                         logger.info(f"   trackingNo: {tracking_no}")
@@ -991,8 +992,6 @@ class BitgetService:
     def place_order_with_tp_sl(self, symbol, side, entry_price, stop_price, tp_price=None):
         """
         v2.3.14: Copy Trade API ile order aç (trackingNo döndürür)
-        
-        Eski CCXT versiyonu yerine Copy Trade API kullanır.
         """
         self._require_auth()
         try:
@@ -1000,7 +999,6 @@ class BitgetService:
             coin_name = symbol.replace('/USDT:USDT', '')
             self.set_leverage(symbol)
             
-            # SL minimum mesafe kontrolü
             original_stop = stop_price
             stop_distance_pct = abs(entry_price - stop_price) / entry_price if entry_price > 0 else 0
             min_stop_pct = Config.STOP_DISTANCE_MIN
@@ -1030,7 +1028,6 @@ class BitgetService:
             logger.info(f"   TP: {format_price_display(tp_rounded)} | SL: {format_price_display(sl_rounded)}")
             logger.info(f"   Marjin: ${actual_margin:.2f} | Notional: ${notional_usd:.2f}")
             
-            # Copy Trade API ile order aç
             result = self.place_copy_trade_order(
                 symbol=symbol,
                 side=side,
@@ -1044,7 +1041,7 @@ class BitgetService:
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': result.get('tracking_no'),  # v2.3.14: trackingNo eklendi
+                    'tracking_no': result.get('tracking_no'),
                     'contracts': contracts,
                     'entry_price': entry_price,
                     'margin_usd': actual_margin,
@@ -1086,16 +1083,6 @@ class BitgetService:
     def close_position(self, symbol, side=None, order_type=None, slippage_pct=None):
         """
         v2.3.13: Pozisyon kapatma - LIMIT ORDER DESTEKLİ
-        
-        Args:
-            symbol: Trading pair
-            side: 'long' veya 'short' (None ise ilk pozisyonu kapat)
-            order_type: 'limit' veya 'market' (None ise Config.CLOSE_ORDER_TYPE)
-            slippage_pct: Limit order için slippage (None ise Config.CLOSE_SLIPPAGE_PCT)
-        
-        Limit Close:
-            - LONG kapatma (SELL): current_price * (1 - slippage)
-            - SHORT kapatma (BUY): current_price * (1 + slippage)
         """
         self._require_auth()
         try:
@@ -1121,11 +1108,10 @@ class BitgetService:
             
             params = {
                 'marginMode': 'cross',
-                'tradeSide': 'close',  # v2.4.2: Hedge mode için zorunlu
+                'tradeSide': 'close',
                 'reduceOnly': True
             }
             
-            # LIMIT ORDER
             if close_order_type == 'limit':
                 current_price = self.get_current_price(symbol)
                 if current_price <= 0:
@@ -1134,9 +1120,9 @@ class BitgetService:
                 else:
                     precision = self.get_price_precision(symbol)
                     
-                    if close_side == 'sell':  # LONG kapatma
+                    if close_side == 'sell':
                         limit_price = current_price * (1 - close_slippage)
-                    else:  # SHORT kapatma
+                    else:
                         limit_price = current_price * (1 + close_slippage)
                     
                     limit_price = round_price_to_precision(limit_price, precision)
@@ -1155,7 +1141,6 @@ class BitgetService:
                         'slippage_pct': close_slippage
                     }
             
-            # MARKET ORDER
             logger.info(f"🔴 CLOSE (MARKET): {coin_name} | {target_pos['side'].upper()} | {contracts} kontrat")
             
             order = self.exchange.create_order(
@@ -1216,14 +1201,13 @@ class BitgetService:
     def execute_trade_for_setup(self, setup_data, claude_decision=None):
         """
         v2.3.14: Unified Trade Execution - Copy Trade API ile
-        tracking_no döndürür
         """
         try:
             pair = setup_data.get('pair', '')
             direction = setup_data.get('direction', 'LONG').upper()
             entry_price = float(setup_data.get('entry_price', 0))
             stop_price = float(setup_data.get('stop_price', 0))
-            tp_price = float(setup_data.get('tp_price', 0))  # v2.4.10: tek tp
+            tp_price = float(setup_data.get('tp_price', 0))
             
             if not pair:
                 return {'success': False, 'error': 'Pair belirtilmedi'}
@@ -1261,7 +1245,7 @@ class BitgetService:
                 return {
                     'success': True,
                     'order_id': result.get('order_id'),
-                    'tracking_no': tracking_no,  # v2.3.14: trackingNo eklendi
+                    'tracking_no': tracking_no,
                     'contracts': result.get('contracts', 0),
                     'margin_usd': result.get('margin_usd', 0),
                     'position_usd': result.get('position_usd', 0),

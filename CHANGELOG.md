@@ -1,6 +1,30 @@
-# T-TARS Changelog v2.4.10
+# T-TARS CHANGELOG
 
-## 📅 2025-12-26
+## v2.4.11 (2025-12-26)
+
+### 🔒 Güvenlik İyileştirmeleri (Stop-Loss Bug Fix)
+- **NEW:** Claude Service'de Stop Sanity Check
+  - LONG: Stop < Entry < TP kontrolü
+  - SHORT: TP < Entry < Stop kontrolü
+  - Yanlış sıralı stop/tp → SKIP
+- **NEW:** Entry/Current fark kontrolü
+  - %1'den fazla fark → SKIP
+  - Limit order instant fill önleme
+
+### 📊 Yeni Özellikler
+- **NEW:** `/score` komutunda En Kötü/En İyi coin gösterimi
+  - Son 30 günlük coin bazlı PnL breakdown
+  - Win/Loss sayıları coin bazında
+- **NEW:** `get_pnl_history()` coin bazlı agregasyon
+  - Her coin için: total_pnl, trades, wins, losses
+
+### 📁 Değişen Dosyalar
+- `bitget_service.py` - Coin breakdown eklendi
+- `claude_service.py` - Stop sanity + Entry/Current check
+- `telegram_handlers.py` - Worst/Best coin gösterimi
+
+---
+## v2.4.10 (2025-12-26)
 
 ### 🔄 DEĞİŞİKLİKLER
 
@@ -19,6 +43,8 @@
 - `main.py`: setup_data'da tp1_price/tp2_price → tp_price
 - `bitget_service.py`: execute_trade_for_setup() tp1_price → tp_price
 - `telegram_handlers.py`: /plan komutunda TP1/TP2 → tek TP gösterimi
+- `strategies/__init__.py`: TP1_MULTIPLIER, TP2_MULTIPLIER → TP_MULTIPLIER
+- `claude_service.py`: adjust_stop_and_tp() ve evaluate_setup() tek TP sistemi
 
 ### 📁 DEĞİŞEN DOSYALAR
 
@@ -28,7 +54,9 @@
 4. `main.py` - tp_price kullanımı
 5. `bitget_service.py` - tp_price parametre
 6. `telegram_handlers.py` - /plan tek TP gösterimi
-7. `VERSION` - 2.4.10
+7. `strategies/__init__.py` - TP_MULTIPLIER export
+8. `claude_service.py` - Tek TP adjustment ve evaluation
+9. `VERSION` - 2.4.10
 
 ### ⚠️ BREAKING CHANGES
 

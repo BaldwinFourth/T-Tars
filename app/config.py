@@ -86,7 +86,7 @@ class Config:
         'ETH/USDT:USDT',   # Ethereum
         'SOL/USDT:USDT',   # Solana
         'BNB/USDT:USDT',   # BNB
-        'XAU/USDT:USDT',   # Gold
+        'XAUT/USDT:USDT',   # Gold
         'JUP/USDT:USDT',   # Jupiter
         'XRP/USDT:USDT',   # Ripple
         'TRX/USDT:USDT',   # Tron
@@ -103,7 +103,7 @@ class Config:
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
         'PUMP/USDT:USDT', 'BCH/USDT:USDT',
-        'XAU/USDT:USDT', 'FLOKI/USDT:USDT', 'NIGHT/USDT:USDT',
+        'XAUT/USDT:USDT', 'FLOKI/USDT:USDT', 'NIGHT/USDT:USDT',
     ]
     
     # ============================================

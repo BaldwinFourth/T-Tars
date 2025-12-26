@@ -1,33 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.3.9
-============================
+T-TARS Claude Service v2.4.10
+==============================
 Claude AI API wrapper for market analysis and setup evaluation.
+
+v2.4.10:
+- CHANGED: TP1/TP2 sistemi → Tek TP sistemi (TP_MULTIPLIER=3.0)
+- REMOVED: tp1_price, tp2_price → tp_price
+- CHANGED: adjust_stop_and_tp() tek TP döndürüyor
+- CHANGED: MIN_RR_RATIO 2.0 → 3.0
 
 v2.3.9:
 - FIX: EXPAND adjustment artık risk olarak algılanmıyor
 - CHANGED: "⚠️ STOP ADJUSTMENT" → "ℹ️ STOP/TP OPTİMİZASYONU"
-- ADDED: EXPAND için pozitif açıklama (R:R korundu notu)
 
 v2.3.8:
 - CHANGED: Volume threshold'lar calculators.py'den import ediliyor (DRY)
 - CHANGED: MIN_RR_RATIO calculators.py'den import ediliyor (DRY)
-- Prompt'taki hardcoded değerler kaldırıldı
-
-v2.3.4:
-- FIX: adjust_stop_and_tp() artık TP2'yi de hesaplıyor
-- FIX: ATR=0 kontrolü eklendi (ATR yoksa SKIP)
-- FIX: TP2 = TP1 * 2 formülü (R:R korunuyor)
-- LONG/SHORT için doğru TP2 hesaplaması
-
-v2.3.2:
-- Otomatik Stop Adjustment sistemi
-- Stop < 0.8% → %0.8'e çek, TP orantılı uzat
-- Stop >= 2.5% → SKIP
-
-v2.3.1:
-- R:R floating point hatası düzeltildi
-- Hardcoded değerler KALDIRILDI
 """
 
 from anthropic import Anthropic
@@ -38,7 +27,8 @@ from app.strategies.calculators import (
     VOLUME_LOW,
     VOLUME_GOOD,
     VOLUME_EXCELLENT,
-    MIN_RR_RATIO
+    MIN_RR_RATIO,
+    TP_MULTIPLIER  # v2.4.10: tek TP
 )
 from app.config import Config
 import logging
@@ -63,7 +53,7 @@ def format_price_display(price):
 
 
 class ClaudeService:
-    """Claude Haiku 4.5 API Service - v2.3.8 (AI Decision Engine + Stop/TP Adjustment)"""
+    """Claude Haiku 4.5 API Service - v2.4.10 (AI Decision Engine + Tek TP Sistemi)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -76,26 +66,23 @@ class ClaudeService:
         '3d': '3m', '3m': '3m'
     }
     
-    # v2.3.8: Stop Adjustment Sabitleri - Config'den türetiliyor (DRY)
-    # Config.STOP_DISTANCE_MIN = 0.008 → %0.8
-    # Config.STOP_DISTANCE_MAX = 0.025 → %2.5
+    # v2.4.10: Stop Adjustment Sabitleri
     STOP_IDEAL_MAX = 1.5    # İdeal maksimum (ara değer)
     STOP_AGGRESSIVE_TARGET = 1.8  # 2-2.5% arası için hedef
     AGGRESSIVE_RR = 3.0     # 2-2.5% arası için R:R
     
-    # v2.3.4: TP Multipliers
-    TP1_RR = 2.0  # TP1 = 2R
-    TP2_RR = 4.0  # TP2 = 4R
+    # v2.4.10: Tek TP (calculators'tan import edilen TP_MULTIPLIER kullanılıyor)
     
     def __init__(self):
         self.client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
         
-        # v2.3.8: Stop thresholds Config'den türetiliyor (DRY)
+        # Stop thresholds Config'den türetiliyor (DRY)
         self.STOP_MIN_PCT = Config.STOP_DISTANCE_MIN * 100      # 0.008 → 0.8
         self.STOP_ADJUST_MAX = Config.STOP_DISTANCE_MAX * 100   # 0.025 → 2.5
         
-        logger.info(f"✅ Claude Service v2.3.8 initialized: {Config.CLAUDE_MODEL} | "
-                   f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}%")
+        logger.info(f"✅ Claude Service v2.4.10 initialized: {Config.CLAUDE_MODEL} | "
+                   f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
+                   f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
     
     def analyze(self, prompt):
         """
@@ -126,9 +113,9 @@ class ClaudeService:
             logger.error(f"Claude API error: {e}")
             raise
     
-    def adjust_stop_and_tp(self, entry_price, stop_price, tp1_price, tp2_price, direction):
+    def adjust_stop_and_tp(self, entry_price, stop_price, tp_price, direction):
         """
-        v2.3.4: Otomatik Stop/TP Adjustment (TP2 dahil!)
+        v2.4.10: Otomatik Stop/TP Adjustment (Tek TP!)
         
         Kurallar:
         1. Stop < 0.8% → %0.8'e çek, TP orantılı uzat
@@ -137,16 +124,13 @@ class ClaudeService:
         4. Stop 2-2.5% → %1.8'e çek, TP 3R yap
         5. Stop >= 2.5% → None döndür (SKIP)
         
-        v2.3.4 FIX: TP2 de hesaplanıyor (TP2 = TP1 * 2 oranı korunuyor)
-        
         Returns:
-            dict: {'stop_price', 'tp1_price', 'tp2_price', 'adjusted', 'adjustment_type', ...}
+            dict: {'stop_price', 'tp_price', 'adjusted', 'adjustment_type', ...}
             None: SKIP gerekiyorsa
         """
         entry = float(entry_price)
         stop = float(stop_price)
-        tp1 = float(tp1_price)
-        tp2 = float(tp2_price) if tp2_price else tp1 * 2  # Fallback
+        tp = float(tp_price)
         
         # Direction normalize
         is_long = direction.upper() == 'LONG'
@@ -155,20 +139,15 @@ class ClaudeService:
         stop_distance = abs(entry - stop)
         stop_pct = (stop_distance / entry) * 100 if entry > 0 else 0
         
-        # Orijinal TP mesafeleri
-        tp1_distance = abs(tp1 - entry)
-        tp2_distance = abs(tp2 - entry)
+        # Orijinal TP mesafesi
+        tp_distance = abs(tp - entry)
         
         # Orijinal R:R
-        original_rr = tp1_distance / stop_distance if stop_distance > 0 else 0
-        
-        # TP2/TP1 oranı (genellikle 2.0)
-        tp2_tp1_ratio = tp2_distance / tp1_distance if tp1_distance > 0 else 2.0
+        original_rr = tp_distance / stop_distance if stop_distance > 0 else 0
         
         result = {
             'stop_price': stop,
-            'tp1_price': tp1,
-            'tp2_price': tp2,
+            'tp_price': tp,
             'adjusted': False,
             'adjustment_type': None,
             'original_stop_pct': round(stop_pct, 2),
@@ -201,25 +180,21 @@ class ClaudeService:
             # Yeni stop mesafesi
             new_stop_distance = entry * (self.STOP_MIN_PCT / 100)
             
-            # Yeni TP mesafeleri (aynı R:R'ı korumak için orantılı)
-            new_tp1_distance = tp1_distance * expansion_ratio
-            new_tp2_distance = new_tp1_distance * tp2_tp1_ratio
+            # Yeni TP mesafesi (aynı R:R'ı korumak için orantılı)
+            new_tp_distance = tp_distance * expansion_ratio
             
             # Yeni fiyatlar - LONG/SHORT ayrımı
             if is_long:
                 new_stop = entry - new_stop_distance
-                new_tp1 = entry + new_tp1_distance
-                new_tp2 = entry + new_tp2_distance
+                new_tp = entry + new_tp_distance
             else:  # SHORT
                 new_stop = entry + new_stop_distance
-                new_tp1 = entry - new_tp1_distance
-                new_tp2 = entry - new_tp2_distance
+                new_tp = entry - new_tp_distance
             
-            new_rr = new_tp1_distance / new_stop_distance if new_stop_distance > 0 else original_rr
+            new_rr = new_tp_distance / new_stop_distance if new_stop_distance > 0 else original_rr
             
             result['stop_price'] = round(new_stop, 8)
-            result['tp1_price'] = round(new_tp1, 8)
-            result['tp2_price'] = round(new_tp2, 8)
+            result['tp_price'] = round(new_tp, 8)
             result['adjusted'] = True
             result['adjustment_type'] = 'EXPAND'
             result['new_stop_pct'] = self.STOP_MIN_PCT
@@ -227,8 +202,7 @@ class ClaudeService:
             
             logger.info(f"📐 Stop EXPAND ({direction}): %{stop_pct:.2f} → %{self.STOP_MIN_PCT} | "
                        f"Stop: {format_price_display(stop)} → {format_price_display(new_stop)} | "
-                       f"TP1: {format_price_display(tp1)} → {format_price_display(new_tp1)} | "
-                       f"TP2: {format_price_display(tp2)} → {format_price_display(new_tp2)} | "
+                       f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {new_rr:.2f}")
             
             return result
@@ -243,25 +217,21 @@ class ClaudeService:
             # Yeni stop mesafesi
             new_stop_distance = entry * (self.STOP_IDEAL_MAX / 100)
             
-            # Yeni TP mesafeleri (aynı R:R'ı korumak için orantılı)
-            new_tp1_distance = tp1_distance * shrink_ratio
-            new_tp2_distance = new_tp1_distance * tp2_tp1_ratio
+            # Yeni TP mesafesi (aynı R:R'ı korumak için orantılı)
+            new_tp_distance = tp_distance * shrink_ratio
             
             # Yeni fiyatlar - LONG/SHORT ayrımı
             if is_long:
                 new_stop = entry - new_stop_distance
-                new_tp1 = entry + new_tp1_distance
-                new_tp2 = entry + new_tp2_distance
+                new_tp = entry + new_tp_distance
             else:  # SHORT
                 new_stop = entry + new_stop_distance
-                new_tp1 = entry - new_tp1_distance
-                new_tp2 = entry - new_tp2_distance
+                new_tp = entry - new_tp_distance
             
-            new_rr = new_tp1_distance / new_stop_distance if new_stop_distance > 0 else original_rr
+            new_rr = new_tp_distance / new_stop_distance if new_stop_distance > 0 else original_rr
             
             result['stop_price'] = round(new_stop, 8)
-            result['tp1_price'] = round(new_tp1, 8)
-            result['tp2_price'] = round(new_tp2, 8)
+            result['tp_price'] = round(new_tp, 8)
             result['adjusted'] = True
             result['adjustment_type'] = 'SHRINK'
             result['new_stop_pct'] = self.STOP_IDEAL_MAX
@@ -269,8 +239,7 @@ class ClaudeService:
             
             logger.info(f"📐 Stop SHRINK ({direction}): %{stop_pct:.2f} → %{self.STOP_IDEAL_MAX} | "
                        f"Stop: {format_price_display(stop)} → {format_price_display(new_stop)} | "
-                       f"TP1: {format_price_display(tp1)} → {format_price_display(new_tp1)} | "
-                       f"TP2: {format_price_display(tp2)} → {format_price_display(new_tp2)} | "
+                       f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {new_rr:.2f}")
             
             return result
@@ -282,23 +251,19 @@ class ClaudeService:
             # Yeni stop mesafesi: %1.8
             new_stop_distance = entry * (self.STOP_AGGRESSIVE_TARGET / 100)
             
-            # Yeni TP mesafeleri: 3R ve 6R (veya orijinal oran)
-            new_tp1_distance = new_stop_distance * self.AGGRESSIVE_RR
-            new_tp2_distance = new_tp1_distance * tp2_tp1_ratio
+            # Yeni TP mesafesi: 3R
+            new_tp_distance = new_stop_distance * self.AGGRESSIVE_RR
             
             # Yeni fiyatlar - LONG/SHORT ayrımı
             if is_long:
                 new_stop = entry - new_stop_distance
-                new_tp1 = entry + new_tp1_distance
-                new_tp2 = entry + new_tp2_distance
+                new_tp = entry + new_tp_distance
             else:  # SHORT
                 new_stop = entry + new_stop_distance
-                new_tp1 = entry - new_tp1_distance
-                new_tp2 = entry - new_tp2_distance
+                new_tp = entry - new_tp_distance
             
             result['stop_price'] = round(new_stop, 8)
-            result['tp1_price'] = round(new_tp1, 8)
-            result['tp2_price'] = round(new_tp2, 8)
+            result['tp_price'] = round(new_tp, 8)
             result['adjusted'] = True
             result['adjustment_type'] = 'AGGRESSIVE'
             result['new_stop_pct'] = self.STOP_AGGRESSIVE_TARGET
@@ -306,8 +271,7 @@ class ClaudeService:
             
             logger.info(f"📐 Stop AGGRESSIVE ({direction}): %{stop_pct:.2f} → %{self.STOP_AGGRESSIVE_TARGET} | "
                        f"Stop: {format_price_display(stop)} → {format_price_display(new_stop)} | "
-                       f"TP1: {format_price_display(tp1)} → {format_price_display(new_tp1)} | "
-                       f"TP2: {format_price_display(tp2)} → {format_price_display(new_tp2)} | "
+                       f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {self.AGGRESSIVE_RR}")
             
             return result
@@ -317,7 +281,7 @@ class ClaudeService:
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
-        v2.3.2: AI Setup Değerlendirmesi - Stop Adjustment + "Neyse O" Modeli
+        v2.4.10: AI Setup Değerlendirmesi - Tek TP Sistemi
         
         Kritik veri eksikse → LOG + SKIP (hardcoded default YOK!)
         
@@ -372,28 +336,20 @@ class ClaudeService:
                 return self._skip_response(f"{pair}: stop_price eksik")
             stop_price = float(stop_price)
             
-            # TP1 PRICE
-            tp1_price = setup_data.get('tp1_price')
-            if tp1_price is None or tp1_price == 0:
-                logger.error(f"❌ SKIP [{pair}]: 'tp1_price' eksik veya 0!")
-                return self._skip_response(f"{pair}: tp1_price eksik")
-            tp1_price = float(tp1_price)
+            # v2.4.10: TP PRICE (tek TP)
+            tp_price = setup_data.get('tp_price')
+            if tp_price is None or tp_price == 0:
+                logger.error(f"❌ SKIP [{pair}]: 'tp_price' eksik veya 0!")
+                return self._skip_response(f"{pair}: tp_price eksik")
+            tp_price = float(tp_price)
             
-            # TP2 PRICE (opsiyonel - yoksa tp1 kullan)
-            tp2_price = setup_data.get('tp2_price')
-            if tp2_price:
-                tp2_price = float(tp2_price)
-            else:
-                tp2_price = tp1_price
-                logger.debug(f"⚠️ [{pair}]: tp2_price yok, tp1 kullanılıyor")
-            
-            # v2.3.4: TP2 Sanity Check (ATR=0 durumunu yakala)
-            if direction.upper() == 'LONG' and tp2_price <= entry_price:
-                logger.error(f"❌ SKIP [{pair}]: TP2 ({tp2_price}) <= Entry ({entry_price}) - LONG için geçersiz!")
-                return self._skip_response(f"{pair}: TP2 entry'den düşük veya eşit (muhtemelen ATR=0)")
-            if direction.upper() == 'SHORT' and tp2_price >= entry_price:
-                logger.error(f"❌ SKIP [{pair}]: TP2 ({tp2_price}) >= Entry ({entry_price}) - SHORT için geçersiz!")
-                return self._skip_response(f"{pair}: TP2 entry'den yüksek veya eşit (muhtemelen ATR=0)")
+            # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)
+            if direction.upper() == 'LONG' and tp_price <= entry_price:
+                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) <= Entry ({entry_price}) - LONG için geçersiz!")
+                return self._skip_response(f"{pair}: TP entry'den düşük veya eşit (muhtemelen ATR=0)")
+            if direction.upper() == 'SHORT' and tp_price >= entry_price:
+                logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) >= Entry ({entry_price}) - SHORT için geçersiz!")
+                return self._skip_response(f"{pair}: TP entry'den yüksek veya eşit (muhtemelen ATR=0)")
             
             # R:R RATIO
             rr_ratio = setup_data.get('rr_ratio')
@@ -486,14 +442,13 @@ class ClaudeService:
                 logger.warning(f"⚠️ [{pair}]: Volume[{atr_key}] eksik veya format yanlış!")
             
             # ============================================
-            # v2.3.4: STOP/TP ADJUSTMENT (TP2 dahil!)
+            # v2.4.10: STOP/TP ADJUSTMENT (Tek TP!)
             # ============================================
             
             adjustment_result = self.adjust_stop_and_tp(
                 entry_price=entry_price,
                 stop_price=stop_price,
-                tp1_price=tp1_price,
-                tp2_price=tp2_price,
+                tp_price=tp_price,
                 direction=direction
             )
             
@@ -508,10 +463,9 @@ class ClaudeService:
                     'adjustments': {}
                 }
             
-            # Adjusted değerleri kullan (v2.3.4: TP2 dahil!)
+            # v2.4.10: Adjusted değerleri kullan (tek TP)
             stop_price = adjustment_result['stop_price']
-            tp1_price = adjustment_result['tp1_price']
-            tp2_price = adjustment_result['tp2_price']
+            tp_price = adjustment_result['tp_price']
             stop_distance_pct = adjustment_result['new_stop_pct']
             rr_ratio = adjustment_result['new_rr']
             
@@ -527,7 +481,7 @@ class ClaudeService:
             logger.debug(f"""
 📊 [{pair}] Evaluate Setup Debug:
    Direction: {direction} | TF: {timeframe} | Type: {setup_type}
-   Entry: {entry_price} | Stop: {stop_price} | TP1: {tp1_price} | TP2: {tp2_price}
+   Entry: {entry_price} | Stop: {stop_price} | TP: {tp_price}
    R:R: {rr_ratio:.2f} | Stop%: {stop_distance_pct:.2f}%
    Adjusted: {adjustment_result['adjusted']} | Type: {adjustment_result['adjustment_type']}
    Confidence: {confidence_label} | Score: {strength_score}
@@ -538,7 +492,7 @@ class ClaudeService:
             # ÖN KONTROLLER (Claude'a göndermeden önce)
             # ============================================
             
-            # v2.3.8: MIN_RR_RATIO calculators'tan (DRY)
+            # v2.4.10: MIN_RR_RATIO = 3.0
             if round(rr_ratio, 2) < MIN_RR_RATIO:
                 logger.info(f"⏭️ Pre-filter SKIP [{pair}]: RR {rr_ratio:.2f} < {MIN_RR_RATIO}")
                 return {
@@ -547,9 +501,6 @@ class ClaudeService:
                     'reasoning': f'RR çok düşük: {rr_ratio:.2f} < {MIN_RR_RATIO} minimum',
                     'adjustments': {}
                 }
-            
-            # NOT: Stop mesafesi kontrolü artık adjust_stop_and_tp() içinde yapılıyor
-            # Eski sabit %0.8 min ve %1.5 max kontrolleri kaldırıldı
             
             # ============================================
             # CLAUDE PROMPT
@@ -564,12 +515,11 @@ class ClaudeService:
             if python_score:
                 score_info += f"- Python Score: {python_score:.2f}/1.0 ({python_score*100:.0f}/100)\n"
             
-            # Adjustment bilgisi - v2.3.9: EXPAND pozitif algı
+            # Adjustment bilgisi - EXPAND pozitif algı
             adjustment_info = ""
             if adjustment_result['adjusted']:
                 adj_type = adjustment_result['adjustment_type']
                 if adj_type == 'EXPAND':
-                    # EXPAND = Stop ve TP orantılı genişletildi, R:R AYNI kaldı = İYİ
                     adjustment_info = f"""
 ## ℹ️ STOP/TP OPTİMİZASYONU (EXPAND):
 - Stop %{adjustment_result['original_stop_pct']:.2f} → %{adjustment_result['new_stop_pct']:.2f} (minimum mesafeye genişletildi)
@@ -578,7 +528,6 @@ class ClaudeService:
 - NOT: Bu bir risk DEĞİL, güvenlik optimizasyonu. R:R aynı kaldığı için trade kalitesi değişmedi.
 """
                 else:
-                    # SHRINK veya AGGRESSIVE için eski format
                     adjustment_info = f"""
 ## ℹ️ STOP/TP AYARLANDI ({adj_type}):
 - Orijinal Stop: %{adjustment_result['original_stop_pct']:.2f}
@@ -586,7 +535,7 @@ class ClaudeService:
 - R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f}
 """
             
-            # v2.3.8: Volume threshold'lar calculators'tan (DRY)
+            # v2.4.10: Tek TP promptu
             prompt = f"""Sen T-TARS Trading AI'sın. Profesyonel bir ICT/SMC trader olarak aşağıdaki setup'ı değerlendir.
 
 ## SETUP BİLGİLERİ:
@@ -596,8 +545,7 @@ class ClaudeService:
 - Timeframe: {timeframe}
 - Entry: {format_price_display(entry_price)}
 - Stop Loss: {format_price_display(stop_price)} (mesafe: %{stop_distance_pct:.2f})
-- TP1: {format_price_display(tp1_price)}
-- TP2: {format_price_display(tp2_price)}
+- TP: {format_price_display(tp_price)}
 - R:R Ratio: {rr_ratio:.2f}
 {score_info}{adjustment_info}
 ## MARKET VERİSİ:
@@ -690,6 +638,7 @@ SADECE aşağıdaki JSON formatında cevap ver:
             if action not in ['ENTER', 'SKIP', 'WAIT']:
                 action = 'WAIT'
             
+            # v2.4.10: tek TP
             result = {
                 'action': action,
                 'confidence': int(decision.get('confidence', 50)),
@@ -700,7 +649,7 @@ SADECE aşağıdaki JSON formatında cevap ver:
                     'original_stop_pct': adjustment_result['original_stop_pct'],
                     'new_stop_pct': adjustment_result['new_stop_pct'],
                     'stop_price': stop_price,
-                    'tp1_price': tp1_price
+                    'tp_price': tp_price
                 },
                 'input_tokens': response.usage.input_tokens,
                 'output_tokens': response.usage.output_tokens

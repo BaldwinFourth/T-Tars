@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Strategies v2.4.0
-=========================
+T-TARS Strategies v2.4.10
+==========================
 Trading strategy modülleri.
+
+v2.4.10:
+- CHANGED: TP1_MULTIPLIER, TP2_MULTIPLIER → TP_MULTIPLIER (tek TP sistemi)
 
 v2.4.0:
 - NEW: calculate_pdc_bias - PDC bazlı bias belirleme
@@ -12,10 +15,6 @@ v2.4.0:
 - NEW: check_doji - Doji kontrolü
 - NEW: MIN_OB_SIZE_ATR, MIN_FVG_SIZE_ATR constants
 - NEW: OB_ZONE_MIN/MAX, FVG_ZONE_MIN/MAX, DOJI_BODY_THRESHOLD constants
-
-v2.3.11:
-- calculators: Yeni constant'lar eklendi
-- volume_analyzer: Webhook storage fonksiyonları eklendi
 """
 
 from .calculators import (
@@ -35,8 +34,7 @@ from .calculators import (
     # R:R Constants
     MIN_RR_RATIO,
     STOP_MULTIPLIER,
-    TP1_MULTIPLIER,
-    TP2_MULTIPLIER,
+    TP_MULTIPLIER,  # v2.4.10: tek TP
     # Volume thresholds
     VOLUME_TRADEABLE_MIN,
     VOLUME_LOW,
@@ -111,8 +109,7 @@ __all__ = [
     # Calculators - R:R Constants
     'MIN_RR_RATIO',
     'STOP_MULTIPLIER',
-    'TP1_MULTIPLIER',
-    'TP2_MULTIPLIER',
+    'TP_MULTIPLIER',  # v2.4.10: tek TP
     # Calculators - Volume Constants
     'VOLUME_TRADEABLE_MIN',
     'VOLUME_LOW',

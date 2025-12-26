@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.4.11
+T-TARS Claude Service v2.4.12
 ==============================
 Claude AI API wrapper for market analysis and setup evaluation.
 
+v2.4.12:
+- CHANGED: Limit Order Güvenlik Kontrolleri (3 katmanlı)
+  1. Yön Kontrolü: LONG: Stop<Entry<Current, SHORT: Current<Entry<Stop
+  2. Stop-Entry Mesafesi >= %0.8
+  3. Stop-Current Mesafesi >= %0.8
+- REMOVED: Entry/Current %1 fark kontrolü (yanlış mantık - OB/FVG uzak olabilir)
+
 v2.4.11:
 - NEW: Stop Sanity Check (LONG: Stop<Entry<TP, SHORT: TP<Entry<Stop)
-- NEW: Entry/Current fark kontrolü (>1% → SKIP)
 - Limit order instant fill sorunu için ek güvenlik katmanı
 
 v2.4.10:
@@ -58,7 +64,7 @@ def format_price_display(price):
 
 
 class ClaudeService:
-    """Claude Haiku 4.5 API Service - v2.4.11 (AI Decision Engine + Safety Checks)"""
+    """Claude Haiku 4.5 API Service - v2.4.12 (AI Decision Engine + Safety Checks)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -76,8 +82,8 @@ class ClaudeService:
     STOP_AGGRESSIVE_TARGET = 1.8  # 2-2.5% arası için hedef
     AGGRESSIVE_RR = 3.0     # 2-2.5% arası için R:R
     
-    # v2.4.11: Entry/Current fark limiti
-    ENTRY_CURRENT_MAX_DIFF = 0.01  # %1 (limit order instant fill önleme)
+    # v2.4.12: Minimum mesafe sabiti (Config'den alınıyor ama class seviyesinde de tanımlı)
+    MIN_DISTANCE_PCT = 0.008  # %0.8 - Stop-Entry ve Stop-Current için minimum
     
     def __init__(self):
         self.client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
@@ -86,7 +92,7 @@ class ClaudeService:
         self.STOP_MIN_PCT = Config.STOP_DISTANCE_MIN * 100      # 0.008 → 0.8
         self.STOP_ADJUST_MAX = Config.STOP_DISTANCE_MAX * 100   # 0.025 → 2.5
         
-        logger.info(f"✅ Claude Service v2.4.11 initialized: {Config.CLAUDE_MODEL} | "
+        logger.info(f"✅ Claude Service v2.4.12 initialized: {Config.CLAUDE_MODEL} | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
     
@@ -388,43 +394,54 @@ class ClaudeService:
             current_price = float(current_price)
             
             # ============================================
-            # v2.4.11: STOP SANİTY CHECK
+            # v2.4.12: LİMİT ORDER GÜVENLİK KONTROLLERİ
             # ============================================
             is_long = direction.upper() == 'LONG'
             
-            # LONG: Stop < Entry < TP olmalı
+            # -------------------------------------------
+            # KONTROL 1: YÖN KONTROLÜ (Tam Sıralama)
+            # LONG:  Stop < Entry < Current (fiyat aşağı gelecek, bekleyecek)
+            # SHORT: Current < Entry < Stop (fiyat yukarı çıkacak, bekleyecek)
+            # -------------------------------------------
             if is_long:
-                if not (stop_price < entry_price < tp_price):
-                    logger.error(f"❌ SKIP [{pair}]: LONG sanity fail! "
-                                f"Stop({format_price_display(stop_price)}) < "
-                                f"Entry({format_price_display(entry_price)}) < "
-                                f"TP({format_price_display(tp_price)}) değil!")
-                    return self._skip_response(f"{pair}: LONG stop/entry/TP sırası yanlış")
+                if not (stop_price < entry_price < current_price):
+                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG sıralama yanlış!")
+                    logger.warning(f"   Stop({format_price_display(stop_price)}) < Entry({format_price_display(entry_price)}) < Current({format_price_display(current_price)}) olmalı")
+                    if stop_price >= entry_price:
+                        return self._skip_response(f"{pair}: LONG Stop >= Entry")
+                    if entry_price >= current_price:
+                        return self._skip_response(f"{pair}: LONG Entry >= Current, limit hemen fill olur")
+            else:  # SHORT
+                if not (current_price < entry_price < stop_price):
+                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT sıralama yanlış!")
+                    logger.warning(f"   Current({format_price_display(current_price)}) < Entry({format_price_display(entry_price)}) < Stop({format_price_display(stop_price)}) olmalı")
+                    if entry_price >= stop_price:
+                        return self._skip_response(f"{pair}: SHORT Entry >= Stop")
+                    if current_price >= entry_price:
+                        return self._skip_response(f"{pair}: SHORT Current >= Entry, limit hemen fill olur")
             
-            # SHORT: TP < Entry < Stop olmalı
-            else:
-                if not (tp_price < entry_price < stop_price):
-                    logger.error(f"❌ SKIP [{pair}]: SHORT sanity fail! "
-                                f"TP({format_price_display(tp_price)}) < "
-                                f"Entry({format_price_display(entry_price)}) < "
-                                f"Stop({format_price_display(stop_price)}) değil!")
-                    return self._skip_response(f"{pair}: SHORT stop/entry/TP sırası yanlış")
+            # -------------------------------------------
+            # KONTROL 2: STOP-ENTRY MESAFESİ >= %0.8
+            # -------------------------------------------
+            stop_entry_pct = abs(stop_price - entry_price) / entry_price if entry_price > 0 else 0
+            if stop_entry_pct < self.MIN_DISTANCE_PCT:
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Entry mesafesi çok küçük!")
+                logger.warning(f"   Stop-Entry: %{stop_entry_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
+                return self._skip_response(f"{pair}: Stop-Entry %{stop_entry_pct*100:.2f} < %0.8 minimum")
             
-            # ============================================
-            # v2.4.11: ENTRY/CURRENT PRICE FARKI KONTROLÜ
-            # ============================================
-            price_diff_pct = abs(current_price - entry_price) / entry_price if entry_price > 0 else 0
+            # -------------------------------------------
+            # KONTROL 3: STOP-CURRENT MESAFESİ >= %0.8
+            # Volatilite güvenliği - fill olsa bile stop tetiklenmez
+            # -------------------------------------------
+            stop_current_pct = abs(stop_price - current_price) / current_price if current_price > 0 else 0
+            if stop_current_pct < self.MIN_DISTANCE_PCT:
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Current mesafesi çok küçük!")
+                logger.warning(f"   Stop-Current: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
+                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %0.8 minimum")
             
-            # %1'den fazla fark varsa SKIP (limit order hemen fill olur, stop yanlış kalır)
-            if price_diff_pct > self.ENTRY_CURRENT_MAX_DIFF:
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Entry/Current fark %{price_diff_pct*100:.2f} > %{self.ENTRY_CURRENT_MAX_DIFF*100}")
-                logger.warning(f"   Entry: {format_price_display(entry_price)} | Current: {format_price_display(current_price)}")
-                return {
-                    'action': 'SKIP',
-                    'confidence': 100,
-                    'reasoning': f'Entry/Current fark cok buyuk: %{price_diff_pct*100:.1f}',
-                    'adjustments': {}
-                }
+            # Log: Tüm kontroller geçti
+            logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti: "
+                        f"Stop-Entry: %{stop_entry_pct*100:.2f}, Stop-Current: %{stop_current_pct*100:.2f}")
             
             # ============================================
             # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)

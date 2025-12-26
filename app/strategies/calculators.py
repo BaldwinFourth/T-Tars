@@ -48,10 +48,10 @@ SCORE_RR_ELSE = 0.20
 # ============================================
 # VOLUME THRESHOLDS (Fine tuning buradan)
 # ============================================
-VOLUME_TRADEABLE_MIN = 0.7 # Minimum tradeable (bu altı = reject)
-VOLUME_LOW = 0.9           # Düşük ama kabul edilebilir
-VOLUME_MEDIUM = 1.3        # Orta
-VOLUME_GOOD = 1.7          # İyi
+VOLUME_TRADEABLE_MIN = 0.65 # Minimum tradeable (bu altı = reject)
+VOLUME_LOW = 0.8           # Düşük ama kabul edilebilir
+VOLUME_MEDIUM = 1.5        # Orta
+VOLUME_GOOD = 1.8          # İyi
 VOLUME_EXCELLENT = 2.0     # Mükemmel volume spike
 
 # Volume Spike Flag (boolean için) - bitget_service kullanıyor
@@ -65,25 +65,25 @@ VOLUME_STRENGTH_MEDIUM = 2.0 # >= 2.0 → 'medium'
 # ============================================
 # VOLUME SCORES (Fine tuning buradan)
 # ============================================
-SCORE_VOLUME_EXCELLENT = 1.20  # Bonus
-SCORE_VOLUME_GOOD = 0.90
-SCORE_VOLUME_MEDIUM = 0.70
-SCORE_VOLUME_LOW = 0.40
-SCORE_VOLUME_ELSE = 0.25
+SCORE_VOLUME_EXCELLENT = 1.50  # Bonus
+SCORE_VOLUME_GOOD = 1.10
+SCORE_VOLUME_MEDIUM = 0.80
+SCORE_VOLUME_LOW = 0.55
+SCORE_VOLUME_ELSE = 0.3
 
 # ============================================
 # OB/FVG STRENGTH MAPPING (Fine tuning buradan)
 # ============================================
 STRENGTH_MAP = {
-    'high': 1.15,    # Bonus
+    'high': 1.35,    # Bonus
     'medium': 0.75,
-    'low': 0.35
+    'low': 0.30
 }
 
 # ============================================
 # FALLBACK DEFAULTS (Bilinmeyen değer gelirse)
 # ============================================
-DEFAULT_STRENGTH_SCORE = 0.25   # Bilinmeyen strength için
+DEFAULT_STRENGTH_SCORE = 0.10   # Bilinmeyen strength için
 
 # ============================================
 # WEIGHT DISTRIBUTION (Fine tuning buradan)
@@ -94,20 +94,20 @@ WEIGHT_RR = 0.20           # Risk:Reward ağırlığı
 # Toplam = 1.0
 
 # Volume Veto Threshold
-VOLUME_VETO_MAX_SCORE = 0.45  # Volume < VOLUME_LOW ise max bu score
+VOLUME_VETO_MAX_SCORE = 0.50  # Volume < VOLUME_LOW ise max bu score
 
 # ============================================
 # v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
 # ============================================
-MIN_OB_SIZE_ATR = 1.0      # OB en az 1.0 ATR olmalı
-MIN_FVG_SIZE_ATR = 1.0     # FVG en az 1.0 ATR olmalı
+MIN_OB_SIZE_ATR = 1.2      # OB en az 1.0 ATR olmalı
+MIN_FVG_SIZE_ATR = 1.2     # FVG en az 1.0 ATR olmalı
 
 # ============================================
 # v2.4.0: FİBO ZONE TANIMLARI
 # ============================================
 OB_ZONE_MIN = 0.70         # OB arama: %70-90
 OB_ZONE_MAX = 0.90
-FVG_ZONE_MIN = 0.60        # FVG arama: %60-90
+FVG_ZONE_MIN = 0.70        # FVG arama: %60-90
 FVG_ZONE_MAX = 0.90
 
 # ============================================

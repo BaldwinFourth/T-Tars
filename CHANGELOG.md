@@ -1,4 +1,60 @@
-# T-TARS CHANGELOG
+# T-TARS Changelog
+
+## v2.4.12 (2024-12-26) - Limit Order Güvenlik Kontrolleri
+
+### 🔧 CHANGED
+- **claude_service.py**: Limit order güvenlik kontrolleri yeniden tasarlandı (3 katmanlı)
+
+### ❌ REMOVED
+- Entry/Current %1 fark kontrolü (yanlış mantık - OB/FVG entry uzak olabilir, bu normal)
+
+### ✅ NEW - 3 Katmanlı Güvenlik Sistemi
+
+**Kontrol 1: Yön Kontrolü (Tam Sıralama)**
+```
+LONG:  Stop < Entry < Current  (fiyat aşağı gelecek, limit bekleyecek)
+SHORT: Current < Entry < Stop  (fiyat yukarı çıkacak, limit bekleyecek)
+```
+- Limit order anında fill olmasını önler
+- Stop'un doğru tarafta olduğunu garanti eder
+
+**Kontrol 2: Stop-Entry Mesafesi >= %0.8**
+```
+|Stop - Entry| / Entry >= 0.008 (%0.8)
+```
+- Minimum stop mesafesini garanti eder
+- adjust_stop_and_tp() ile uyumlu çalışır
+
+**Kontrol 3: Stop-Current Mesafesi >= %0.8**
+```
+|Stop - Current| / Current >= 0.008 (%0.8)
+```
+- Volatilite güvenliği sağlar
+- Fill olsa bile anında stop tetiklenmez
+
+### 🐛 FIX
+- v2.4.11'deki Entry/Current %1 fark kontrolü OB/FVG setup'larını yanlış engelliyordu
+- Artık limit order uzak entry'lere izin veriyor (normal davranış)
+
+### 📊 Beklenen Log Formatları
+```
+# Yön Kontrolü Fail
+⏭️ Pre-filter SKIP [ETH/USDT:USDT]: SHORT sıralama yanlış!
+   Current($123.50) < Entry($121.02) < Stop($124.00) olmalı
+
+# Stop-Entry Fail
+⏭️ Pre-filter SKIP [SOL/USDT:USDT]: Stop-Entry mesafesi çok küçük!
+   Stop-Entry: %0.35 < %0.8
+
+# Stop-Current Fail
+⏭️ Pre-filter SKIP [BTC/USDT:USDT]: Stop-Current mesafesi çok küçük!
+   Stop-Current: %0.52 < %0.8
+
+# Tüm Kontroller Geçti
+✅ [ETH/USDT:USDT] Güvenlik kontrolleri geçti: Stop-Entry: %1.20, Stop-Current: %2.50
+```
+
+---
 
 ## v2.4.11 (2025-12-26)
 

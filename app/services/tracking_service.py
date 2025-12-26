@@ -103,7 +103,7 @@ class TrackingService:
         self.bucket_name = bucket_name
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        logger.info(f"✅ Tracking Service v2.4.3 initialized: {bucket_name}")
+        logger.info(f"✅ Tracking Service initialized: {bucket_name}")
     
     def check_and_expire_orders(self, exchange):
         """

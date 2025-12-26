@@ -74,7 +74,7 @@ def init_handlers(telegram, exchange, claude, storage, tracking, market_cache=No
     _tracking = tracking
     _market_cache = market_cache  # v2.4.4
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.4.4) - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
+    logger.info(f"✅ Telegram handlers initialized - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
 
 
 # --------------------------

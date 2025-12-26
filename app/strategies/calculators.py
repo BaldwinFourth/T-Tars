@@ -39,19 +39,19 @@ RR_MINIMUM = 3.0           # Minimum
 # ============================================
 # R:R SCORES (Fine tuning buradan)
 # ============================================
-SCORE_RR_EXCELLENT = 1.05  # Bonus
-SCORE_RR_GOOD = 0.85
-SCORE_RR_MEDIUM = 0.65
-SCORE_RR_MINIMUM = 0.35
+SCORE_RR_EXCELLENT = 1.25  # Bonus
+SCORE_RR_GOOD = 1.00
+SCORE_RR_MEDIUM = 0.95
+SCORE_RR_MINIMUM = 0.75
 SCORE_RR_ELSE = 0.20
 
 # ============================================
 # VOLUME THRESHOLDS (Fine tuning buradan)
 # ============================================
-VOLUME_TRADEABLE_MIN = 0.5 # Minimum tradeable (bu altı = reject)
-VOLUME_LOW = 0.8           # Düşük ama kabul edilebilir
-VOLUME_MEDIUM = 1.2        # Orta
-VOLUME_GOOD = 1.6          # İyi
+VOLUME_TRADEABLE_MIN = 0.7 # Minimum tradeable (bu altı = reject)
+VOLUME_LOW = 0.9           # Düşük ama kabul edilebilir
+VOLUME_MEDIUM = 1.3        # Orta
+VOLUME_GOOD = 1.7          # İyi
 VOLUME_EXCELLENT = 2.0     # Mükemmel volume spike
 
 # Volume Spike Flag (boolean için) - bitget_service kullanıyor

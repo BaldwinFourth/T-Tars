@@ -145,7 +145,7 @@ class BitgetService:
                 self._configure_account_mode()
 
             self._market_cache = {}
-            logger.info(f"Bitget Servisi Initialized | Lev:{Config.DEFAULT_LEVERAGE}x | "
+            logger.info(f"Bitget Service Initialized | Lev:{Config.DEFAULT_LEVERAGE}x | "
                        f"Close:{Config.CLOSE_ORDER_TYPE} | Copy Trade API: Active")
 
         except Exception as e:

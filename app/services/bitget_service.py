@@ -1,62 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.7
+T-TARS Bitget Service v2.4.9
 ============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
 
-v2.4.7:
-- FIX: get_pnl_history() '_signed_request' hatası düzeltildi
-- CHANGED: order-history-track endpoint kullanılıyor (Copy Trade)
-- CHANGED: achievedPL field'ından gerçek PnL hesaplanıyor
+v2.4.9:
+- FIX: get_closed_position_pnl() field isimleri düzeltildi
+  - achievedProfits → achievedPL
+  - openAvgPrice → openPriceAvg
+  - closeAvgPrice → closePriceAvg
 
-v2.4.6:
-- NEW: get_pnl_history(days) - history-position'dan gerçek PnL hesaplama
-- CHANGED: get_trade_history_stats() - Günlük/Haftalık/Aylık PnL artık history-position'dan
-- FIX: lastWeekProfitList/lastMonthProfitList boş geliyordu (profit share, trade PnL değil)
-
-v2.4.5:
-- NEW: get_trade_history_stats() - Bitget history'den WIN/LOSS istatistikleri
-- /score komutu artik GCS yerine Bitget API'den veri cekiyor
-
-v2.4.4:
-- NEW: get_order_history_track() - Kapanmış pozisyon geçmişi
-- NEW: get_closed_position_pnl() - PnL ve WIN/LOSS bilgisi
-- Endpoint: /api/v2/copy/mix-trader/order-history-track
-
-v2.4.3:
-- FIX: TP/SL preset parametreleri duzeltildi (Bitget API doc)
-- CHANGED: stopSurplus/stopLoss → presetStopSurplusPrice/presetStopLossPrice
-
-v2.4.2:
-- FIX: Hedge mode params duzeltildi (Bitget API doc'a gore)
-- CHANGED: holdSide kaldirildi, tradeSide='open'/'close' kullaniliyor
-- side=buy (LONG), side=sell (SHORT), tradeSide=open/close
-
-v2.4.1:
-- FIX: Hedge mode icin holdSide parametresi eklendi
-- FIX: "unilateral position" hatasi (40774) duzeltildi
-
-v2.4.0:
-- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
-- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
-- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
-- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
-
-v2.3.14:
-- NEW: place_copy_trade_order() - Copy Trade API ile order aç
-- CHANGED: place_order_with_tp_sl() → Copy Trade API kullanıyor
-- NEW: trackingNo response'da döndürülüyor
-- FIXED: trackingNo:None sorunu çözüldü
-
-v2.3.13:
-- NEW: close_position() → Limit order desteği (market yerine)
-- NEW: Config.CLOSE_ORDER_TYPE ('limit' / 'market')
-- NEW: Config.CLOSE_SLIPPAGE_PCT (%0.2 default)
-- Slippage: LONG close → price * (1 - slippage), SHORT close → price * (1 + slippage)
-
-v2.3.8:
-- CHANGED: MARKET_CACHE_TTL → Config.MARKET_CACHE_TTL (DRY)
-- CHANGED: Volume spike/strength thresholds → calculators.py'den import (DRY)
 """
 
 import ccxt
@@ -327,7 +280,7 @@ class BitgetService:
         Returns:
             dict: {
                 'success': True/False,
-                'orders': [{trackingNo, symbol, posSide, achievedProfits, ...}]
+                'orders': [{trackingNo, symbol, posSide, achievedPL, ...}]
             }
         """
         self._require_auth()
@@ -396,10 +349,13 @@ class BitgetService:
             
             order = orders[0]
             
+            # Debug: API response field'larını logla
+            logger.info(f"📋 API Response keys: {list(order.keys())}")
+            
             # PnL bilgilerini çek
-            pnl = float(order.get('achievedProfits', 0))
-            entry_price = float(order.get('openAvgPrice', 0))
-            close_price = float(order.get('closeAvgPrice', 0))
+            pnl = float(order.get('achievedPL', 0))
+            entry_price = float(order.get('openPriceAvg', 0))
+            close_price = float(order.get('closePriceAvg', 0))
             open_fee = float(order.get('openFee', 0))
             close_fee = float(order.get('closeFee', 0))
             total_fees = open_fee + close_fee

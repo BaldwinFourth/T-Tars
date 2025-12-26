@@ -1,5 +1,16 @@
 # T-TARS Changelog
 
+## v2.4.9 (2025-12-26)
+
+### Fixed
+- **get_closed_position_pnl:** API field isimleri düzeltildi
+  - `achievedProfits` → `achievedPL`
+  - `openAvgPrice` → `openPriceAvg`
+  - `closeAvgPrice` → `closePriceAvg`
+- **Pozisyon Kapanış:** Artık gerçek giriş/çıkış fiyatı ve PnL gösteriliyor
+
+---
+
 ## v2.4.8 (2024-12-25)
 
 ### Changed

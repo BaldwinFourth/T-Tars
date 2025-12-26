@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.4.0
-===========================
+T-TARS FVG Detector v2.4.10
+============================
 Fair Value Gap setup detection (Scanning + Validation)
+
+v2.4.10:
+- CHANGED: TP1/TP2 kaldırıldı → Tek TP (3.0 ATR)
+- CHANGED: MIN_RR_RATIO = 3.0 (eskiden 2.0)
+- UPDATED: Return dict'ten tp1, tp2, tp1_price, tp2_price kaldırıldı → tp, tp_price
 
 v2.4.0:
 - NEW: Minimum boyut filtresi (≥1.0 ATR)
 - NEW: En yakın 4 FVG döndür (noise reduction)
-- NEW: current_price ve atr parametresi scan_fair_value_gaps'a eklendi
-- CHANGED: Import'lara MIN_FVG_SIZE_ATR eklendi
 
-v2.3.11:
-- CHANGED: calculate_setup_strength() 3 parametre (confidence kaldırıldı)
-
-Formül (Kadircan):
+Formül (Kadircan) v2.4.10:
 Gap Size = Gap High - Gap Low
-Entry = Gap içinde (genelde mid-point)
-LONG:  Stop = Entry - ATR, TP1 = Entry + 2*ATR, TP2 = Entry + 4*ATR
-SHORT: Stop = Entry + ATR, TP1 = Entry - 2*ATR, TP2 = Entry - 4*ATR
+Entry = Gap mid-point
+LONG:  Stop = Entry - ATR, TP = Entry + 3*ATR
+SHORT: Stop = Entry + ATR, TP = Entry - 3*ATR
 """
 
 import logging
@@ -25,10 +25,9 @@ from app.strategies.calculators import (
     calculate_setup_strength,
     format_price,
     MIN_RR_RATIO,
-    TP1_MULTIPLIER,
-    TP2_MULTIPLIER,
+    TP_MULTIPLIER,  # v2.4.10: Tek TP multiplier
     VOLUME_TRADEABLE_MIN,
-    MIN_FVG_SIZE_ATR  # v2.4.0: Minimum FVG boyutu
+    MIN_FVG_SIZE_ATR
 )
 from app.strategies.volume_analyzer import analyze_volume
 
@@ -161,11 +160,11 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         stop_price = entry_price - atr
         stop_loss = format_price(stop_price)
         
-        tp1_price = entry_price + (atr * TP1_MULTIPLIER)
-        tp2_price = entry_price + (atr * TP2_MULTIPLIER)
+        # v2.4.10: Tek TP (3.0 ATR)
+        tp_price = entry_price + (atr * TP_MULTIPLIER)
         
         risk = abs(entry_price - stop_price)
-        reward = abs(tp1_price - entry_price)
+        reward = abs(tp_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
         if round(rr_ratio, 2) < MIN_RR_RATIO:
@@ -185,7 +184,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
-• TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
+• TP: {format_price(tp_price)}
 • R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
@@ -197,16 +196,14 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
             'timeframe': timeframe,
             'entry_price': entry_price,
             'stop_price': stop_price,
-            'tp1_price': tp1_price,
-            'tp2_price': tp2_price,
+            'tp_price': tp_price,
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
             'volume_spike_ratio': vol_ratio,
             'fvg_strength': fvg_strength,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
-            'tp1': format_price(tp1_price),
-            'tp2': format_price(tp2_price),
+            'tp': format_price(tp_price),
             'detailed_explanation': detailed_explanation
         }
         
@@ -239,11 +236,11 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         stop_price = entry_price + atr
         stop_loss = format_price(stop_price)
         
-        tp1_price = entry_price - (atr * TP1_MULTIPLIER)
-        tp2_price = entry_price - (atr * TP2_MULTIPLIER)
+        # v2.4.10: Tek TP (3.0 ATR)
+        tp_price = entry_price - (atr * TP_MULTIPLIER)
         
         risk = abs(stop_price - entry_price)
-        reward = abs(entry_price - tp1_price)
+        reward = abs(entry_price - tp_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
         if round(rr_ratio, 2) < MIN_RR_RATIO:
@@ -263,7 +260,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
-• TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
+• TP: {format_price(tp_price)}
 • R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
@@ -275,16 +272,14 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
             'timeframe': timeframe,
             'entry_price': entry_price,
             'stop_price': stop_price,
-            'tp1_price': tp1_price,
-            'tp2_price': tp2_price,
+            'tp_price': tp_price,
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
             'volume_spike_ratio': vol_ratio,
             'fvg_strength': fvg_strength,
             'entry_zone': f"{format_price(gap_low)} - {format_price(gap_high)}",
-            'tp1': format_price(tp1_price),
-            'tp2': format_price(tp2_price),
+            'tp': format_price(tp_price),
             'detailed_explanation': detailed_explanation
         }
         

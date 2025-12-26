@@ -1,4 +1,42 @@
-# T-TARS Changelog
+# T-TARS Changelog v2.4.10
+
+## 📅 2025-12-26
+
+### 🔄 DEĞİŞİKLİKLER
+
+**TP1/TP2 → Tek TP Sistemi (R:R 3.0)**
+- `calculators.py`: MIN_RR_RATIO = 3.0 (eskiden 2.0)
+- `calculators.py`: TP_MULTIPLIER = 3.0 (tek TP)
+- `calculators.py`: TP1_MULTIPLIER, TP2_MULTIPLIER kaldırıldı
+- `calculators.py`: RR threshold'lar güncellendi (EXCELLENT=5.0, GOOD=4.0, MEDIUM=3.5, MINIMUM=3.0)
+
+**Detector Güncellemeleri**
+- `ob_detector.py`: tp1_price/tp2_price → tp_price
+- `fvg_detector.py`: tp1_price/tp2_price → tp_price
+- Her iki detector'da return dict güncellendi: tp1, tp2 → tp
+
+**Ana Uygulama Güncellemeleri**
+- `main.py`: setup_data'da tp1_price/tp2_price → tp_price
+- `bitget_service.py`: execute_trade_for_setup() tp1_price → tp_price
+- `telegram_handlers.py`: /plan komutunda TP1/TP2 → tek TP gösterimi
+
+### 📁 DEĞİŞEN DOSYALAR
+
+1. `calculators.py` - MIN_RR=3.0, tek TP multiplier
+2. `ob_detector.py` - Tek TP return
+3. `fvg_detector.py` - Tek TP return  
+4. `main.py` - tp_price kullanımı
+5. `bitget_service.py` - tp_price parametre
+6. `telegram_handlers.py` - /plan tek TP gösterimi
+7. `VERSION` - 2.4.10
+
+### ⚠️ BREAKING CHANGES
+
+- Setup dictionary'lerde `tp1_price`, `tp2_price` artık yok
+- Tek `tp_price` ve `tp` field'ları kullanılıyor
+- Minimum R:R 2.0'dan 3.0'a yükseldi
+
+---
 
 ## v2.4.9 (2025-12-26)
 

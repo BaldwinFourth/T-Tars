@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.4.9
-============================
+T-TARS Bitget Service v2.4.10
+=============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.4.10:
+- CHANGED: tp1_price → tp_price (tek TP sistemi)
+- Detector'lar artık tp_price döndürüyor
 
 v2.4.9:
 - FIX: get_closed_position_pnl() field isimleri düzeltildi
@@ -10,6 +14,30 @@ v2.4.9:
   - openAvgPrice → openPriceAvg
   - closeAvgPrice → closePriceAvg
 
+v2.4.7:
+- FIX: get_pnl_history() '_signed_request' hatası düzeltildi
+- CHANGED: order-history-track endpoint kullanılıyor (Copy Trade)
+- CHANGED: achievedPL field'ından gerçek PnL hesaplanıyor
+- FIX: Copy Trade API endpoint duzeltildi (yanlıs endpoint -> CCXT create_order)
+- CHANGED: Normal CCXT create_order kullaniliyor, trackingNo sonradan sorgulanıyor
+- NEW: daily_ohlcv eklendi (PDC bias + Doji kontrolu icin)
+- CHANGED: scan_order_blocks/scan_fair_value_gaps atr ve current_price parametreleri eklendi
+
+v2.3.14:
+- NEW: place_copy_trade_order() - Copy Trade API ile order aç
+- CHANGED: place_order_with_tp_sl() → Copy Trade API kullanıyor
+- NEW: trackingNo response'da döndürülüyor
+- FIXED: trackingNo:None sorunu çözüldü
+
+v2.3.13:
+- NEW: close_position() → Limit order desteği (market yerine)
+- NEW: Config.CLOSE_ORDER_TYPE ('limit' / 'market')
+- NEW: Config.CLOSE_SLIPPAGE_PCT (%0.2 default)
+- Slippage: LONG close → price * (1 - slippage), SHORT close → price * (1 + slippage)
+
+v2.3.8:
+- CHANGED: MARKET_CACHE_TTL → Config.MARKET_CACHE_TTL (DRY)
+- CHANGED: Volume spike/strength thresholds → calculators.py'den import (DRY)
 """
 
 import ccxt
@@ -1195,7 +1223,7 @@ class BitgetService:
             direction = setup_data.get('direction', 'LONG').upper()
             entry_price = float(setup_data.get('entry_price', 0))
             stop_price = float(setup_data.get('stop_price', 0))
-            tp1_price = float(setup_data.get('tp1_price', 0))
+            tp_price = float(setup_data.get('tp_price', 0))  # v2.4.10: tek tp
             
             if not pair:
                 return {'success': False, 'error': 'Pair belirtilmedi'}
@@ -1203,7 +1231,7 @@ class BitgetService:
                 return {'success': False, 'error': 'Entry price geçersiz'}
             if stop_price <= 0:
                 return {'success': False, 'error': 'Stop price geçersiz'}
-            if tp1_price <= 0:
+            if tp_price <= 0:
                 return {'success': False, 'error': 'TP price geçersiz'}
             
             if '/' not in pair:
@@ -1224,7 +1252,7 @@ class BitgetService:
             
             result = self.place_order_with_tp_sl(
                 symbol=symbol, side=side, entry_price=entry_price,
-                stop_price=stop_price, tp_price=tp1_price
+                stop_price=stop_price, tp_price=tp_price
             )
             
             if result.get('success'):
@@ -1239,7 +1267,7 @@ class BitgetService:
                     'position_usd': result.get('position_usd', 0),
                     'entry_price': entry_price,
                     'stop_price': result.get('sl_price', stop_price),
-                    'tp_price': result.get('tp_price', tp1_price),
+                    'tp_price': result.get('tp_price', tp_price),
                     'tp_sl_preset': result.get('tp_sl_preset', False)
                 }
             else:

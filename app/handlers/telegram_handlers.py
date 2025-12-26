@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.4.6
-================================
+T-TARS Telegram Handlers v2.4.10
+=================================
 Telegram bot komut handler'ları.
+
+v2.4.10:
+- CHANGED: /plan komutunda TP1/TP2 → tek TP gösterimi
+- UPDATED: Tek TP sistemi (R:R 3.0)
 
 v2.4.6:
 - NEW: /score'da Günlük PnL eklendi
@@ -11,23 +15,6 @@ v2.4.6:
 v2.4.5:
 - CHANGED: /score artık Bitget API'den çekiyor (GCS tracking yerine)
 - NEW: get_trade_history_stats() kullanılıyor
-
-v2.4.4:
-- FIX: /scan market_cache parametresi eklendi
-- /scan artık TradingView volume verisini kullanıyor
-
-v2.3.11:
-- FIX: /score f-string format hatası düzeltildi
-- FIX: available_balance ternary operatör sorunu çözüldü
-
-v2.3.1:
-- FIX: /score bakiye - Available yerine TOTAL bakiye gösteriliyor
-- FIX: Best/Worst gösterimi - min trade yoksa da göster
-- ADD: Debug bilgileri eklendi
-
-v2.3.0:
-- REMOVED: execute_trade_for_setup() → bitget_service.py'ye taşındı
-- Telegram bildirimleri main.py'de yapılıyor
 """
 
 import logging
@@ -163,8 +150,7 @@ def handle_plan_command(text, chat_id):
                 conf = best_setup['confidence']
                 entry = best_setup.get('entry_zone', 'N/A')
                 stop = best_setup.get('stop_loss', 'N/A')
-                tp1 = best_setup.get('tp1', 'N/A')
-                tp2 = best_setup.get('tp2', 'N/A')
+                tp = best_setup.get('tp', 'N/A')  # v2.4.10: tek TP
                 rr = best_setup.get('rr_ratio', 0)
                 setup_type = best_setup.get('type', 'Unknown')
                 
@@ -176,16 +162,16 @@ def handle_plan_command(text, chat_id):
                 conf_emoji = "🔥" if conf == "HIGH" else "⚡" if conf == "MEDIUM" else "💡"
                 
                 plan_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🎯 *T-TARS AKILLI PLAN*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 📊 *{coin_name}* | {tf} | {bias_emoji}
 💵 Anlık Fiyat: {format_price(current_price)}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 {dir_emoji} *EN İYİ FIRSAT: {direction}*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 {conf_emoji} *Güven:* {conf}
 📈 *Setup:* {setup_type}
@@ -193,20 +179,19 @@ def handle_plan_command(text, chat_id):
 
 🎯 *Giriş:* {entry}
 🛑 *Stop Loss:* {stop}
-✅ *TP1:* {tp1}
-🏆 *TP2:* {tp2}
+✅ *TP:* {tp}
 📊 *R:R:* {rr:.2f}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 📉 *TEKNİK VERİLER*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 📏 ATR({tf}): {format_price(atr_val)}
 📊 Hacim: {vol_ratio:.2f}x
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🕯 *PDC (Previous Day Candle)*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 • High: {format_price(pdc_high)}
 • Low: {format_price(pdc_low)}

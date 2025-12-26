@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.4.0
+T-TARS Trading Calculators v2.4.10
 ===================================
+v2.4.10:
+- CHANGED: MIN_RR_RATIO = 3.0 (eskiden 2.0)
+- CHANGED: TP_MULTIPLIER = 3.0 (tek TP, eskiden TP1=2.0/TP2=4.0)
+- REMOVED: TP1_MULTIPLIER, TP2_MULTIPLIER (tek TP sistemine geçildi)
+
 v2.4.0:
 - NEW: calculate_pdc_bias() - PDC bazlı bias + Doji kontrolü
 - NEW: calculate_fibo_zones() - Fibo %60-90 ve %70-90 zone hesabı
@@ -9,7 +14,6 @@ v2.4.0:
 - NEW: is_in_fvg_zone() - FVG için %60-90 kontrolü
 - NEW: check_doji() - Tek mum doji kontrolü
 - NEW: MIN_OB_SIZE_ATR = 1.0, MIN_FVG_SIZE_ATR = 1.0
-- MOVED: PDC ve Fibo hesaplamaları bitget_service'den buraya taşındı
 
 v2.3.11:
 - CHANGED: calculate_setup_strength() 4 parametre → 3 parametre
@@ -18,20 +22,19 @@ v2.3.11:
 """
 
 # ============================================
-# ATR MULTIPLIERS - STOP & TP (FINE TUNING)
+# ATR MULTIPLIERS - STOP & TP (v2.4.10)
 # ============================================
 STOP_MULTIPLIER = 1.0      # Stop seviyesi: 1.0 ATR
-TP1_MULTIPLIER = 2.0       # TP1: 2.0 ATR (R:R 2.0)
-TP2_MULTIPLIER = 4.0       # TP2: 4.0 ATR (Ana hedef)
+TP_MULTIPLIER = 3.0        # v2.4.10: Tek TP = 3.0 ATR (R:R 3.0)
 
 # ============================================
-# R:R THRESHOLDS (Fine tuning buradan)
+# R:R THRESHOLDS (v2.4.10)
 # ============================================
-MIN_RR_RATIO = 2.0         # Minimum kabul edilebilir R:R
-RR_EXCELLENT = 4.0         # Mükemmel
-RR_GOOD = 3.5              # İyi
-RR_MEDIUM = 3.0            # Orta
-RR_MINIMUM = 2.0           # Minimum
+MIN_RR_RATIO = 3.0         # v2.4.10: Minimum R:R = 3.0 (eskiden 2.0)
+RR_EXCELLENT = 5.0         # Mükemmel
+RR_GOOD = 4.0              # İyi
+RR_MEDIUM = 3.5            # Orta
+RR_MINIMUM = 3.0           # Minimum
 
 # ============================================
 # R:R SCORES (Fine tuning buradan)
@@ -347,7 +350,9 @@ def calculate_fibo_zones(pdc, bias):
             'fib_100': high,
             'ob_zone': (low, high),
             'fvg_zone': (low, high),
-            'fib_levels': {}
+            'fib_levels': {},
+            'pdc_high': high,
+            'pdc_low': low
         }
     
     # Fibo yönü bias'a göre
@@ -393,7 +398,9 @@ def calculate_fibo_zones(pdc, bias):
         'fib_100': fib_100,
         'ob_zone': (ob_low, ob_high),
         'fvg_zone': (fvg_low, fvg_high),
-        'fib_levels': fib_levels
+        'fib_levels': fib_levels,
+        'pdc_high': high,
+        'pdc_low': low
     }
 
 

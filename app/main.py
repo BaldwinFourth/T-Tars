@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.4.4
-==========================
+T-TARS Trading Bot v2.4.10
+===========================
 Main Flask application with routes.
+
+v2.4.10:
+- CHANGED: TP1/TP2 → Tek TP sistemi (3.0 ATR)
+- CHANGED: MIN_RR_RATIO = 3.0 (eskiden 2.0)
+- UPDATED: setup_data'da tp1_price/tp2_price → tp_price
 
 v2.4.4:
 - IMPROVED: REPLACE mesaji ayri format (EMiR GUNCELLENDi vs YENi EMiR)
@@ -10,17 +15,17 @@ v2.4.4:
 - NEW: Monitor'da pozisyon kapaninca PnL cekiliyor (Bitget API)
 - NEW: WIN/LOSS otomatik belirleniyor
 - NEW: Pozisyon kapaninca Telegram mesaji gonderiliyor
-- FIX: log_setup'a status:'FILLED' eklendi (PENDING bug fix)
-
-v2.4.3:
-- FIX: REPLACE handling duzeltildi (eski order cancel + yeni order)
-- FIX: Duplicate order sorunu cozuldu
-- CHANGED: UPDATE_NEEDED → REPLACE
 
 v2.4.0:
 - UPGRADED: Strateji yeniden yapilandirildi (PDC bias, Fibo zone, Doji, OB/FVG noise filter)
 - Detaylar icin CHANGELOG.md
 
+v2.3.7:
+- NEW: volume_analyzer entegrasyonu (store_volume, get_volume)
+- CHANGED: Webhook hem MARKET_CACHE hem volume_analyzer'a yazar
+- ADD: cleanup_expired_volumes() çağrısı auto_analyze'da
+- ADD: Bar kapanışı timing kontrolü (5m bar + 1dk sonra çalış)
+- Detector'lar artık volume_analyzer'dan okuyabilir
 """
 
 from flask import Flask, request, jsonify
@@ -428,9 +433,9 @@ def monitor_setups():
                             dir_emoji = "📈" if direction == "LONG" else "📉"
                             
                             close_msg = f"""
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 {result_emoji} *POZİSYON KAPANDI*
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 
 {dir_emoji} *{coin_name}* | {direction}
 💵 Giriş: {format_price(entry_price)}
@@ -439,9 +444,9 @@ def monitor_setups():
 {result_emoji} *Sonuç: {trade_result}*
 💲 P/L: {pnl_sign}${pnl:.2f}
 
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 """
                             telegram.send(close_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                         else:
@@ -590,7 +595,7 @@ def auto_analyze():
                                 coin=coin_name,
                                 direction=direction,
                                 entry_price=setup.get('entry_price'),
-                                tp_price=setup.get('tp1_price'),
+                                tp_price=setup.get('tp_price'),  # v2.4.10: tek tp
                                 sl_price=setup.get('stop_price')
                             )
                             
@@ -626,7 +631,7 @@ def auto_analyze():
                             
                             adjustments = decision.get('adjustments', {})
                             stop_price = adjustments.get('stop_price', setup.get('stop_price'))
-                            tp1_price = adjustments.get('tp1_price', setup.get('tp1_price'))
+                            tp_price = adjustments.get('tp_price', setup.get('tp_price'))  # v2.4.10: tek tp
                             
                             exec_result = bitget.execute_trade_for_setup(
                                 setup_data={
@@ -634,7 +639,7 @@ def auto_analyze():
                                     'direction': direction,
                                     'entry_price': setup.get('entry_price'),
                                     'stop_price': stop_price,
-                                    'tp1_price': tp1_price
+                                    'tp_price': tp_price  # v2.4.10: tek tp
                                 },
                                 claude_decision=decision
                             )
@@ -654,9 +659,8 @@ def auto_analyze():
                                     'entry_zone': setup.get('entry_zone', 'N/A'),
                                     'stop_loss': format_price(stop_price),
                                     'stop_price': stop_price,
-                                    'tp1': format_price(tp1_price),
-                                    'tp1_price': tp1_price,
-                                    'tp2_price': setup.get('tp2_price', 0),
+                                    'tp': format_price(tp_price),  # v2.4.10: tek tp
+                                    'tp_price': tp_price,
                                     'rr_ratio': setup.get('rr_ratio', 0),
                                     'volume_spike_ratio': setup.get('volume_spike_ratio', 0),
                                     'ob_strength': setup.get('ob_strength', 'medium'),
@@ -695,9 +699,9 @@ def auto_analyze():
                                         replace_info = ""
                                     
                                     notify_msg = f"""
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 {header}
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 {replace_info}
 📊 *{coin_name}* | {direction} | {timeframe}
 💵 Entry: {format_price(setup.get('entry_price', 0))}
@@ -713,9 +717,9 @@ def auto_analyze():
 • Sebep: {reasoning[:50]}...
 • Python Score: {python_score*100:.0f}/100
 
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 """
                                     telegram.send(notify_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                             else:

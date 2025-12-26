@@ -1,21 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.4.0
-==========================
+T-TARS OB Detector v2.4.10
+===========================
 Order Block setup detection (Scanning + Validation)
+
+v2.4.10:
+- CHANGED: Tek TP sistemi (tp1_price/tp2_price → tp_price)
+- CHANGED: TP_MULTIPLIER = 3.0 kullanılıyor (R:R 3.0)
+- CHANGED: MIN_RR_RATIO = 3.0
 
 v2.4.0:
 - NEW: Minimum boyut filtresi (≥1.0 ATR)
 - NEW: En yakın 4 OB döndür (noise reduction)
 - NEW: current_price parametresi scan_order_blocks'a eklendi
-- CHANGED: Import'lara MIN_OB_SIZE_ATR eklendi
 
 v2.3.11:
 - CHANGED: calculate_setup_strength() 3 parametre (confidence kaldırıldı)
 
-Formül (Kadircan):
-LONG:  Entry = (OB_H + OB_L) / 2, Stop = Entry - ATR, TP1 = Entry + 2*ATR, TP2 = Entry + 4*ATR
-SHORT: Entry = (OB_H + OB_L) / 2, Stop = Entry + ATR, TP1 = Entry - 2*ATR, TP2 = Entry - 4*ATR
+Formül (v2.4.10):
+LONG:  Entry = (OB_H + OB_L) / 2, Stop = Entry - ATR, TP = Entry + 3*ATR
+SHORT: Entry = (OB_H + OB_L) / 2, Stop = Entry + ATR, TP = Entry - 3*ATR
 """
 
 import logging
@@ -23,17 +27,16 @@ from app.strategies.calculators import (
     calculate_setup_strength,
     format_price,
     MIN_RR_RATIO,
-    TP1_MULTIPLIER,
-    TP2_MULTIPLIER,
+    TP_MULTIPLIER,
     VOLUME_TRADEABLE_MIN,
-    MIN_OB_SIZE_ATR  # v2.4.0: Minimum OB boyutu
+    MIN_OB_SIZE_ATR
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_DISTANCE_PERCENT = 3.0
-MAX_OB_COUNT = 4  # v2.4.0: En fazla 4 OB döndür
+MAX_OB_COUNT = 4
 
 
 def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
@@ -74,7 +77,7 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
                     ob_size = ob_high - ob_low
                     ob_mid = (ob_high + ob_low) / 2
                     
-                    # v2.4.0: Boyut filtresi
+                    # Boyut filtresi
                     if atr > 0 and ob_size < (atr * MIN_OB_SIZE_ATR):
                         logger.debug(f"OB Scan [{timeframe_str}]: Bullish OB rejected (size={ob_size:.4f} < {atr * MIN_OB_SIZE_ATR:.4f})")
                         continue
@@ -97,7 +100,7 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
                     ob_size = ob_high - ob_low
                     ob_mid = (ob_high + ob_low) / 2
                     
-                    # v2.4.0: Boyut filtresi
+                    # Boyut filtresi
                     if atr > 0 and ob_size < (atr * MIN_OB_SIZE_ATR):
                         logger.debug(f"OB Scan [{timeframe_str}]: Bearish OB rejected (size={ob_size:.4f} < {atr * MIN_OB_SIZE_ATR:.4f})")
                         continue
@@ -112,12 +115,12 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
                         'volume_confirmed': True
                     })
         
-        # v2.4.0: Fiyata en yakın 4 OB'yi seç
+        # Fiyata en yakın 4 OB'yi seç
         if current_price > 0 and len(obs) > MAX_OB_COUNT:
             obs = sorted(obs, key=lambda x: abs(x['mid'] - current_price))[:MAX_OB_COUNT]
             logger.debug(f"📦 OB Scan [{timeframe_str}]: {len(obs)} OB (filtered to closest {MAX_OB_COUNT})")
         elif obs:
-            obs = obs[-MAX_OB_COUNT:]  # Son 4'ü al
+            obs = obs[-MAX_OB_COUNT:]
             logger.debug(f"📦 OB Scan [{timeframe_str}]: {len(obs)} OB bulundu")
         
         return obs
@@ -138,7 +141,7 @@ def _get_confidence_label(strength_score):
 
 
 def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
-    """Bullish Order Block setup onayı"""
+    """Bullish Order Block setup onayı - v2.4.10: Tek TP"""
     try:
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
@@ -159,18 +162,17 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         stop_price = entry_price - atr
         stop_loss = format_price(stop_price)
         
-        tp1_price = entry_price + (atr * TP1_MULTIPLIER)
-        tp2_price = entry_price + (atr * TP2_MULTIPLIER)
+        # v2.4.10: Tek TP = 3.0 ATR
+        tp_price = entry_price + (atr * TP_MULTIPLIER)
         
         risk = abs(entry_price - stop_price)
-        reward = abs(tp1_price - entry_price)
+        reward = abs(tp_price - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
         if round(rr_ratio, 2) < MIN_RR_RATIO:
             logger.info(f"{coin} OB LONG [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.3.11: 3 parametre (confidence kaldırıldı - circular logic fix)
         ob_strength = ob.get('strength', 'medium')
         strength_score = calculate_setup_strength(vol_ratio, ob_strength, rr_ratio)
         confidence = _get_confidence_label(strength_score)
@@ -183,7 +185,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
-• TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
+• TP: {format_price(tp_price)}
 • R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
@@ -195,8 +197,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
             'timeframe': timeframe,
             'entry_price': entry_price,
             'stop_price': stop_price,
-            'tp1_price': tp1_price,
-            'tp2_price': tp2_price,
+            'tp_price': tp_price,
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
@@ -204,8 +205,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
             'ob_strength': ob_strength,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
-            'tp1': format_price(tp1_price),
-            'tp2': format_price(tp2_price),
+            'tp': format_price(tp_price),
             'detailed_explanation': detailed_explanation
         }
         
@@ -215,7 +215,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
 
 
 def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
-    """Bearish Order Block setup onayı"""
+    """Bearish Order Block setup onayı - v2.4.10: Tek TP"""
     try:
         coin = pair.replace('/USDT:USDT', '').replace('/USDT', '') if pair else "?"
         vol_ratio = volume.get('spike_ratio', 0)
@@ -236,18 +236,17 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         stop_price = entry_price + atr
         stop_loss = format_price(stop_price)
         
-        tp1_price = entry_price - (atr * TP1_MULTIPLIER)
-        tp2_price = entry_price - (atr * TP2_MULTIPLIER)
+        # v2.4.10: Tek TP = 3.0 ATR
+        tp_price = entry_price - (atr * TP_MULTIPLIER)
         
         risk = abs(stop_price - entry_price)
-        reward = abs(entry_price - tp1_price)
+        reward = abs(entry_price - tp_price)
         rr_ratio = reward / risk if risk > 0 else 0
         
         if round(rr_ratio, 2) < MIN_RR_RATIO:
             logger.info(f"{coin} OB SHORT [{timeframe}] rejected: Low R:R ({rr_ratio:.2f} < {MIN_RR_RATIO})")
             return None
         
-        # v2.3.11: 3 parametre (confidence kaldırıldı - circular logic fix)
         ob_strength = ob.get('strength', 'medium')
         strength_score = calculate_setup_strength(vol_ratio, ob_strength, rr_ratio)
         confidence = _get_confidence_label(strength_score)
@@ -260,7 +259,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
 🎯 **Trade:**
 • Entry: {format_price(entry_price)}
 • Stop: {stop_loss}
-• TP1: {format_price(tp1_price)} | TP2: {format_price(tp2_price)}
+• TP: {format_price(tp_price)}
 • R:R: {rr_ratio:.2f} | Confidence: {confidence}
 """
         
@@ -272,8 +271,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
             'timeframe': timeframe,
             'entry_price': entry_price,
             'stop_price': stop_price,
-            'tp1_price': tp1_price,
-            'tp2_price': tp2_price,
+            'tp_price': tp_price,
             'rr_ratio': rr_ratio,
             'confidence': confidence,
             'strength_score': strength_score,
@@ -281,8 +279,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
             'ob_strength': ob_strength,
             'entry_zone': entry_zone,
             'stop_loss': stop_loss,
-            'tp1': format_price(tp1_price),
-            'tp2': format_price(tp2_price),
+            'tp': format_price(tp_price),
             'detailed_explanation': detailed_explanation
         }
         

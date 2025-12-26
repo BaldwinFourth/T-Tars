@@ -5,11 +5,17 @@ T-TARS Claude Service v2.4.12
 Claude AI API wrapper for market analysis and setup evaluation.
 
 v2.4.12:
-- CHANGED: Limit Order Güvenlik Kontrolleri (3 katmanlı)
-  1. Yön Kontrolü: LONG: Stop<Entry<Current, SHORT: Current<Entry<Stop
-  2. Stop-Entry Mesafesi >= %0.8
-  3. Stop-Current Mesafesi >= %0.8
-- REMOVED: Entry/Current %1 fark kontrolü (yanlış mantık - OB/FVG uzak olabilir)
+- CHANGED: Limit Order Güvenlik Kontrolleri (2 katmanlı)
+  1. Yön Kontrolü (ORİJİNAL): LONG: Stop<Entry<Current, SHORT: Current<Entry<Stop
+  2. Stop-Current Mesafesi >= %0.8 (ADJUSTED değerlerle!)
+- REMOVED: Entry/Current %1 fark kontrolü (yanlış mantık)
+- REMOVED: Stop-Entry >= %0.8 kontrolü (adjust_stop_and_tp zaten EXPAND yapıyor)
+- FIX: Stop-Current kontrolü artık ADJUST SONRASI yapılıyor
+
+AKIŞ:
+1. Yön Kontrolü (orijinal değerler) → limit hemen fill olmasın
+2. adjust_stop_and_tp() → Stop %0.8'e EXPAND (gerekirse)
+3. Stop-Current >= %0.8 (adjusted değerler) → volatilite güvenliği
 
 v2.4.11:
 - NEW: Stop Sanity Check (LONG: Stop<Entry<TP, SHORT: TP<Entry<Stop)
@@ -402,6 +408,7 @@ class ClaudeService:
             # KONTROL 1: YÖN KONTROLÜ (Tam Sıralama)
             # LONG:  Stop < Entry < Current (fiyat aşağı gelecek, bekleyecek)
             # SHORT: Current < Entry < Stop (fiyat yukarı çıkacak, bekleyecek)
+            # NOT: Bu kontrol ORİJİNAL değerlerle yapılır (yön değişmez)
             # -------------------------------------------
             if is_long:
                 if not (stop_price < entry_price < current_price):
@@ -420,28 +427,9 @@ class ClaudeService:
                     if current_price >= entry_price:
                         return self._skip_response(f"{pair}: SHORT Current >= Entry, limit hemen fill olur")
             
-            # -------------------------------------------
-            # KONTROL 2: STOP-ENTRY MESAFESİ >= %0.8
-            # -------------------------------------------
-            stop_entry_pct = abs(stop_price - entry_price) / entry_price if entry_price > 0 else 0
-            if stop_entry_pct < self.MIN_DISTANCE_PCT:
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Entry mesafesi çok küçük!")
-                logger.warning(f"   Stop-Entry: %{stop_entry_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
-                return self._skip_response(f"{pair}: Stop-Entry %{stop_entry_pct*100:.2f} < %0.8 minimum")
-            
-            # -------------------------------------------
-            # KONTROL 3: STOP-CURRENT MESAFESİ >= %0.8
-            # Volatilite güvenliği - fill olsa bile stop tetiklenmez
-            # -------------------------------------------
-            stop_current_pct = abs(stop_price - current_price) / current_price if current_price > 0 else 0
-            if stop_current_pct < self.MIN_DISTANCE_PCT:
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Current mesafesi çok küçük!")
-                logger.warning(f"   Stop-Current: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
-                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %0.8 minimum")
-            
-            # Log: Tüm kontroller geçti
-            logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti: "
-                        f"Stop-Entry: %{stop_entry_pct*100:.2f}, Stop-Current: %{stop_current_pct*100:.2f}")
+            # NOT: Stop-Entry >= %0.8 kontrolü KALDIRILDI (v2.4.12)
+            # Sebep: adjust_stop_and_tp() zaten < %0.8 → EXPAND → %0.8'e çekiyor
+            # Stop-Current kontrolü ADJUST SONRASINA taşındı (satır ~540)
             
             # ============================================
             # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)
@@ -540,6 +528,20 @@ class ClaudeService:
                            f"R:R: {adjustment_result['original_rr']} → {adjustment_result['new_rr']}")
             
             # ============================================
+            # v2.4.12: STOP-CURRENT KONTROLÜ (ADJUSTED değerlerle!)
+            # Volatilite güvenliği - fill olsa bile stop tetiklenmez
+            # ============================================
+            stop_current_pct = abs(stop_price - current_price) / current_price if current_price > 0 else 0
+            if stop_current_pct < self.MIN_DISTANCE_PCT:
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Current mesafesi çok küçük (ADJUSTED)!")
+                logger.warning(f"   Adjusted Stop: {format_price_display(stop_price)} | Current: {format_price_display(current_price)}")
+                logger.warning(f"   Stop-Current: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
+                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %0.8 minimum")
+            
+            # Log: Güvenlik kontrolleri geçti
+            logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti (ADJUSTED): Stop-Current: %{stop_current_pct*100:.2f}")
+            
+            # ============================================
             # DEBUG LOG - Toplanan veriler
             # ============================================
             logger.debug(f"""
@@ -547,7 +549,7 @@ class ClaudeService:
    Direction: {direction} | TF: {timeframe} | Type: {setup_type}
    Entry: {entry_price} | Stop: {stop_price} | TP: {tp_price}
    R:R: {rr_ratio:.2f} | Stop%: {stop_distance_pct:.2f}%
-   Current: {current_price} | Diff: {price_diff_pct*100:.2f}%
+   Current: {current_price} | Stop-Current: %{stop_current_pct*100:.2f}
    Adjusted: {adjustment_result['adjusted']} | Type: {adjustment_result['adjustment_type']}
    Confidence: {confidence_label} | Score: {strength_score}
    PDC Bias: {pdc_bias} | ATR: {atr} | Vol: {volume_spike:.2f}x

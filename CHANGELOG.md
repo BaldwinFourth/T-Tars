@@ -1,59 +1,67 @@
 # T-TARS Changelog
 
-## v2.4.12 (2024-12-26) - Limit Order Güvenlik Kontrolleri
+## v2.4.12 (2025-12-26) - Limit Order Güvenlik Kontrolü FIX
 
-### 🔧 CHANGED
-- **claude_service.py**: Limit order güvenlik kontrolleri yeniden tasarlandı (3 katmanlı)
+### 🐛 FIX - Adjust Çakışması Giderildi
+
+**PROBLEM:**
+```
+XAU: Stop-Entry %0.11 < %0.8 → SKIP (adjust şansı olmadan!)
+BCH: Stop-Entry %0.37 < %0.8 → SKIP (adjust şansı olmadan!)
+```
+
+**SEBEP:** Stop-Entry kontrolü ORİJİNAL değerlerle yapılıyordu, adjust_stop_and_tp()'ye hiç ulaşmıyordu.
+
+**ÇÖZÜM:** Stop-Entry kontrolü kaldırıldı, adjust sisteminin EXPAND yapmasına izin verildi.
+
+### 🔄 CHANGED - Yeni Güvenlik Akışı (2 Katman)
+
+```
+ÖNCE (YANLIŞ):
+1. Stop-Entry >= %0.8 (ORİJİNAL) → SKIP ❌
+2. adjust_stop_and_tp() → HİÇ ÇALIŞMIYORDU!
+
+SONRA (DOĞRU):
+1. Yön Kontrolü (ORİJİNAL) → Stop<Entry<Current ✅
+2. adjust_stop_and_tp() → %0.11 → EXPAND → %0.8 ✅
+3. Stop-Current >= %0.8 (ADJUSTED) → Volatilite güvenliği ✅
+```
 
 ### ❌ REMOVED
-- Entry/Current %1 fark kontrolü (yanlış mantık - OB/FVG entry uzak olabilir, bu normal)
+- **Stop-Entry >= %0.8 kontrolü** - adjust_stop_and_tp() zaten EXPAND yapıyor
+- **Entry/Current %1 fark kontrolü** - OB/FVG entry'leri uzak olabilir (normal)
 
-### ✅ NEW - 3 Katmanlı Güvenlik Sistemi
+### ✅ KALAN Güvenlik Kontrolleri
 
-**Kontrol 1: Yön Kontrolü (Tam Sıralama)**
+**Kontrol 1: Yön Kontrolü (ORİJİNAL değerlerle)**
 ```
-LONG:  Stop < Entry < Current  (fiyat aşağı gelecek, limit bekleyecek)
-SHORT: Current < Entry < Stop  (fiyat yukarı çıkacak, limit bekleyecek)
+LONG:  Stop < Entry < Current  (limit bekleyecek)
+SHORT: Current < Entry < Stop  (limit bekleyecek)
 ```
-- Limit order anında fill olmasını önler
-- Stop'un doğru tarafta olduğunu garanti eder
 
-**Kontrol 2: Stop-Entry Mesafesi >= %0.8**
+**Kontrol 2: Stop-Current >= %0.8 (ADJUSTED değerlerle)**
 ```
-|Stop - Entry| / Entry >= 0.008 (%0.8)
+|Adjusted_Stop - Current| / Current >= 0.008
 ```
-- Minimum stop mesafesini garanti eder
-- adjust_stop_and_tp() ile uyumlu çalışır
-
-**Kontrol 3: Stop-Current Mesafesi >= %0.8**
-```
-|Stop - Current| / Current >= 0.008 (%0.8)
-```
+- adjust_stop_and_tp() SONRASI çalışır
 - Volatilite güvenliği sağlar
-- Fill olsa bile anında stop tetiklenmez
 
-### 🐛 FIX
-- v2.4.11'deki Entry/Current %1 fark kontrolü OB/FVG setup'larını yanlış engelliyordu
-- Artık limit order uzak entry'lere izin veriyor (normal davranış)
-
-### 📊 Beklenen Log Formatları
+### 📊 Beklenen Davranış
 ```
-# Yön Kontrolü Fail
-⏭️ Pre-filter SKIP [ETH/USDT:USDT]: SHORT sıralama yanlış!
-   Current($123.50) < Entry($121.02) < Stop($124.00) olmalı
-
-# Stop-Entry Fail
-⏭️ Pre-filter SKIP [SOL/USDT:USDT]: Stop-Entry mesafesi çok küçük!
-   Stop-Entry: %0.35 < %0.8
-
-# Stop-Current Fail
-⏭️ Pre-filter SKIP [BTC/USDT:USDT]: Stop-Current mesafesi çok küçük!
-   Stop-Current: %0.52 < %0.8
-
-# Tüm Kontroller Geçti
-✅ [ETH/USDT:USDT] Güvenlik kontrolleri geçti: Stop-Entry: %1.20, Stop-Current: %2.50
+XAU: Stop-Entry %0.11 → EXPAND → %0.8 → Stop-Current check → Claude'a gider ✅
+BCH: Stop-Entry %0.37 → EXPAND → %0.8 → Stop-Current check → Claude'a gider ✅
 ```
 
+### 📊 Yeni Log Formatları
+```
+# Adjust sonrası log
+🔧 [XAU/USDT:USDT] Stop/TP Adjusted (LONG): EXPAND | Stop: %0.11 → %0.8 | R:R: X → Y
+
+# Stop-Current fail (adjusted değerlerle)
+⏭️ Pre-filter SKIP [BTC/USDT:USDT]: Stop-Current mesafesi çok küçük (ADJUSTED)!
+   Adjusted Stop: $95,000.00 | Current: $95,200.00
+   Stop-Current: %0.21 < %0.8
+```
 ---
 
 ## v2.4.11 (2025-12-26)

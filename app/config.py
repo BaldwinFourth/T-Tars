@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.4.8
+T-TARS Configuration v2.4.13
 ============================
+
+v2.4.13:
+- REMOVED: XAUTUSDT çıkarıldı (yüksek fonlama oranı)
+- ADDED: LTCUSDT, SUIUSDT, ADAUSDT, AVAXUSDT, HYPEUSDT eklendi
+- Toplam: 14 coin
 
 v2.4.8:
 - REMOVED: BTCUSDT auto-scan'den çıkarıldı
 - ADDED: NIGHTUSDT, BCHUSDT, DOGEUSDT eklendi
-
-v2.4.5:
-- REMOVED: 30m timeframe (auto analyze ve scan kapsamından çıkarıldı)
 
 """
 
@@ -17,7 +19,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.4.8"""
+    """T-TARS Configuration v2.4.13"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -42,16 +44,13 @@ class Config:
         return [Config.TELEGRAM_CHAT_ID]
     
     # ============================================
-    # BITGET API (v2.2.0 - OKX'ten geçiş)
+    # BITGET API
     # ============================================
     BITGET_API_KEY = os.getenv('BITGET_API_KEY', '')
     BITGET_SECRET_KEY = os.getenv('BITGET_SECRET_KEY', '')
     BITGET_PASSPHRASE = os.getenv('BITGET_PASSPHRASE', '')
     
-    # Trading ON/OFF switch (/stopbitget, /startbitget)
     BITGET_TRADING_ENABLED = os.getenv('BITGET_TRADING_ENABLED', 'true').lower() == 'true'
-
-    # Default Leverage (20x)
     DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '20'))
     
     # ============================================
@@ -67,74 +66,63 @@ class Config:
     BUCKET_NAME = os.getenv('BUCKET_NAME', 'tars-trading-templates')
     BUCKET_NAME_DATA = os.getenv('BUCKET_NAME_DATA', 'tars-trading-data')
     
-    # Template filenames
     PLAN_TEMPLATE = 'T-Tars Plan.md'
     EXECUTE_TEMPLATE = 'T-Tars Execute Log.md'
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
     
     # ============================================
-    # TIMEFRAMES (v2.4.5 - 30m kaldırıldı)
+    # TIMEFRAMES
     # ============================================
     TIMEFRAMES = ['1h', '15m']
     
     # ============================================
-    # TRADING PAIRS (v2.4.8 - BTC çıktı, NIGHT/BCH/DOGE eklendi)
+    # TRADING PAIRS (v2.4.13 - 14 coin)
     # ============================================
     
-    # Auto-scan listesi (v2.4.8: BTC çıktı, NIGHT/BCH/DOGE eklendi)
     AUTO_SCAN_PAIRS = [
         'ETH/USDT:USDT',   # Ethereum
         'SOL/USDT:USDT',   # Solana
         'BNB/USDT:USDT',   # BNB
-        'XAUT/USDT:USDT',   # Gold
         'JUP/USDT:USDT',   # Jupiter
         'XRP/USDT:USDT',   # Ripple
         'TRX/USDT:USDT',   # Tron
-        'NIGHT/USDT:USDT', # Night (yeni)
-        'BCH/USDT:USDT',   # Bitcoin Cash (yeni)
-        'DOGE/USDT:USDT',  # Dogecoin (yeni)
+        'NIGHT/USDT:USDT', # Night
+        'BCH/USDT:USDT',   # Bitcoin Cash
+        'DOGE/USDT:USDT',  # Dogecoin
+        'LTC/USDT:USDT',   # Litecoin (yeni)
+        'SUI/USDT:USDT',   # Sui (yeni)
+        'ADA/USDT:USDT',   # Cardano (yeni)
+        'AVAX/USDT:USDT',  # Avalanche (yeni)
+        'HYPE/USDT:USDT',  # Hype (yeni)
     ]
     
-    # Manuel /plan için (genişletilmiş liste)
     MANUAL_PAIRS = [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
         'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 
         'TRUMP/USDT:USDT', 'JUP/USDT:USDT', 'AVAX/USDT:USDT', 
         'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
-        'PUMP/USDT:USDT', 'BCH/USDT:USDT',
+        'PUMP/USDT:USDT', 'BCH/USDT:USDT', 'ADA/USDT:USDT',
         'XAUT/USDT:USDT', 'FLOKI/USDT:USDT', 'NIGHT/USDT:USDT',
     ]
     
     # ============================================
-    # RISK MANAGEMENT (v2.3.8)
+    # RISK MANAGEMENT
     # ============================================
-    RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))  # %1 risk (default)
-    
-    # Stop mesafesi limitleri (v2.3.8: MAX %1.5 → %2.5)
-    STOP_DISTANCE_MIN = float(os.getenv('STOP_DISTANCE_MIN', '0.008'))  # %0.8 minimum
-    STOP_DISTANCE_MAX = float(os.getenv('STOP_DISTANCE_MAX', '0.025'))  # %2.5 maksimum
-    
-    # Dinamik marjin limitleri
-    MARGIN_MIN_PERCENT = float(os.getenv('MARGIN_MIN_PERCENT', '1.0'))  # %1
-    MARGIN_MAX_PERCENT = float(os.getenv('MARGIN_MAX_PERCENT', '2.0'))  # %2
-    
-    # Limit Close (v2.3.13)
-    CLOSE_ORDER_TYPE = os.getenv('CLOSE_ORDER_TYPE', 'limit')  # 'limit' veya 'market'
-    CLOSE_SLIPPAGE_PCT = float(os.getenv('CLOSE_SLIPPAGE_PCT', '0.002'))  # %0.2
-    
-    # Safety limits
+    RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '1.0'))
+    STOP_DISTANCE_MIN = float(os.getenv('STOP_DISTANCE_MIN', '0.008'))
+    STOP_DISTANCE_MAX = float(os.getenv('STOP_DISTANCE_MAX', '0.025'))
+    MARGIN_MIN_PERCENT = float(os.getenv('MARGIN_MIN_PERCENT', '1.0'))
+    MARGIN_MAX_PERCENT = float(os.getenv('MARGIN_MAX_PERCENT', '2.0'))
+    CLOSE_ORDER_TYPE = os.getenv('CLOSE_ORDER_TYPE', 'limit')
+    CLOSE_SLIPPAGE_PCT = float(os.getenv('CLOSE_SLIPPAGE_PCT', '0.002'))
     MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '500'))
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
     
     # ============================================
-    # CACHE & MONITORING (v2.3.8)
+    # CACHE & MONITORING
     # ============================================
-    # Market cache TTL - TradingView webhook verilerinin geçerlilik süresi
-    # HTF (15m, 30m, 1h) verileri 15 dakikada bir geliyor → 20 dakika TTL yeterli
-    MARKET_CACHE_TTL = int(os.getenv('MARKET_CACHE_TTL', '1200'))  # 20 dakika (saniye)
-    
-    # Bar kapanışı timing: 15m barlar xx:00, xx:15... kapanır
+    MARKET_CACHE_TTL = int(os.getenv('MARKET_CACHE_TTL', '1200'))
     MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))
     PORT = int(os.getenv('PORT', '8080'))
     
@@ -143,7 +131,6 @@ class Config:
     # ============================================
     @staticmethod
     def validate():
-        """Validate required configuration"""
         required = ['ANTHROPIC_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
         missing = [key for key in required if not getattr(Config, key)]
         if missing:
@@ -152,7 +139,6 @@ class Config:
     
     @staticmethod
     def validate_bitget():
-        """Validate Bitget API configuration"""
         required = ['BITGET_API_KEY', 'BITGET_SECRET_KEY', 'BITGET_PASSPHRASE']
         missing = [key for key in required if not getattr(Config, key)]
         if missing:
@@ -161,11 +147,9 @@ class Config:
     
     @staticmethod
     def get_pair_symbol(ticker):
-        """Convert user input to Bitget format"""
         ticker = ticker.upper().replace('USDT', '')
         return f'{ticker}/USDT:USDT'
     
     @staticmethod
     def get_clean_pair(bitget_pair):
-        """Bitget formatından temiz parite adı al"""
         return bitget_pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')

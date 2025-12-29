@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.4.12
+T-TARS Claude Service v2.5.0
 ==============================
 Claude AI API wrapper for market analysis and setup evaluation.
+
+v2.5.0:
+- NEW: SYSTEM_PROMPT eklendi (Claude artık kim olduğunu biliyor)
+- NEW: Extended Thinking desteği (derin analiz için)
+- CHANGED: API çağrılarına system= ve thinking= parametreleri eklendi
 
 v2.4.12:
 - CHANGED: Limit Order Güvenlik Kontrolleri (2 katmanlı)
@@ -54,6 +59,37 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# ============================================
+# v2.4.14: SISTEM PROMPT
+# ============================================
+SYSTEM_PROMPT = """Sen T-TARS, profesyonel bir ICT/SMC (Inner Circle Trader / Smart Money Concepts) metodolojisi kullanan trading AI asistanısın.
+
+## KİMLİĞİN:
+- Adın: T-TARS (Trading - Technical Analysis & Risk System)
+- Uzmanlık: Kripto futures trading, likidite analizi, order block/FVG tespiti
+- Metodoloji: ICT/SMC konseptleri (likidite avı, OB/FVG tepkileri, PDC bias)
+
+## GÖREVİN:
+1. Setup'ları objektif ve disiplinli değerlendir
+2. Likidite temizliği (sweep) kontrol et
+3. OB/FVG tepki kalitesini analiz et
+4. Confluence (birleşim) noktalarını tespit et
+5. Risk/Reward oranını değerlendir
+
+## KARAR PRENSİPLERİN:
+- ENTER: Minimum 4/5 kriter pozitif, güçlü confluence var
+- SKIP: 2+ kriter negatif veya belirsizlik var
+- WAIT: Daha fazla konfirmasyon gerekiyor
+
+## ÖNEMLİ KURALLAR:
+- Sadece güçlü setup'lara ENTER ver
+- Emin değilsen SKIP (para kaybetmemek kazanmaktan önemli)
+- Duygusal değil, teknik analiz odaklı ol
+- Her zaman JSON formatında cevap ver
+
+## CEVAP FORMATI:
+{"action": "ENTER|SKIP|WAIT", "confidence": 0-100, "reasoning": "kısa açıklama max 100 karakter"}"""
+
 
 def format_price_display(price):
     """Log/mesaj için okunabilir fiyat formatı"""
@@ -70,7 +106,7 @@ def format_price_display(price):
 
 
 class ClaudeService:
-    """Claude Haiku 4.5 API Service - v2.4.12 (AI Decision Engine + Safety Checks)"""
+    """Claude Haiku 4.5 API Service - v2.5.0 (AI Decision Engine + Extended Thinking)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -98,18 +134,28 @@ class ClaudeService:
         self.STOP_MIN_PCT = Config.STOP_DISTANCE_MIN * 100      # 0.008 → 0.8
         self.STOP_ADJUST_MAX = Config.STOP_DISTANCE_MAX * 100   # 0.025 → 2.5
         
-        logger.info(f"✅ Claude Service v2.4.12 initialized: {Config.CLAUDE_MODEL} | "
+        # v2.4.14: Thinking budget
+        self.thinking_budget = Config.THINKING_BUDGET
+        
+        logger.info(f"✅ Claude Service v2.5.0 initialized: {Config.CLAUDE_MODEL} | "
+                   f"Thinking: {self.thinking_budget} tokens | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
     
     def analyze(self, prompt):
         """
         Genel analiz yap (eski fonksiyon - backward compat)
+        v2.4.14: Sistem prompt + extended thinking eklendi
         """
         try:
             response = self.client.messages.create(
                 model=Config.CLAUDE_MODEL,
-                max_tokens=8192,
+                max_tokens=16000,
+                system=SYSTEM_PROMPT,
+                thinking={
+                    "type": "enabled",
+                    "budget_tokens": self.thinking_budget
+                },
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -602,8 +648,8 @@ class ClaudeService:
 - R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f}
 """
             
-            # v2.4.10: Tek TP promptu
-            prompt = f"""Sen T-TARS Trading AI'sın. Profesyonel bir ICT/SMC trader olarak aşağıdaki setup'ı değerlendir.
+            # v2.5.0: User prompt (rol tanımı artık sistem prompt'ta)
+            prompt = f"""Aşağıdaki setup'ı değerlendir:
 
 ## SETUP BİLGİLERİ:
 - Pair: {pair}
@@ -652,24 +698,22 @@ class ClaudeService:
    - Volume spike: {volume_spike:.2f}x (>{VOLUME_LOW} kabul, >{VOLUME_GOOD} iyi, >{VOLUME_EXCELLENT} cok iyi)
    - R:R: {rr_ratio:.2f} (>={MIN_RR_RATIO} minimum)
 
-## KARAR KRİTERLERİ:
-- ENTER: Minimum 4/5 kriter pozitif
-- SKIP: 2+ kriter negatif
-- WAIT: Belirsiz
-
-ÖNEMLİ: Sadece güçlü setup'lara ENTER ver. Emin değilsen SKIP.
-
-SADECE aşağıdaki JSON formatında cevap ver:
+SADECE JSON formatında cevap ver:
 {{"action": "ENTER", "confidence": 85, "reasoning": "kısa açıklama max 80 karakter"}}"""
 
             # ============================================
-            # CLAUDE API ÇAĞRISI
+            # CLAUDE API ÇAĞRISI (v2.4.14: system + thinking)
             # ============================================
-            logger.debug(f"🧠 [{pair}]: Claude API çağrılıyor...")
+            logger.debug(f"🧠 [{pair}]: Claude API çağrılıyor (thinking: {self.thinking_budget} tokens)...")
             
             response = self.client.messages.create(
                 model=Config.CLAUDE_MODEL,
-                max_tokens=256,
+                max_tokens=16000,
+                system=SYSTEM_PROMPT,
+                thinking={
+                    "type": "enabled",
+                    "budget_tokens": self.thinking_budget
+                },
                 messages=[{"role": "user", "content": prompt}]
             )
             

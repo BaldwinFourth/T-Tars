@@ -1,5 +1,45 @@
 # T-TARS Changelog
 
+## v2.5.0 (2024-12-29)
+
+### Yeni Özellikler
+- **SYSTEM_PROMPT:** Claude artık kim olduğunu biliyor (T-TARS, ICT/SMC trader)
+- **Extended Thinking:** Derin analiz için thinking budget (20K tokens)
+- API çağrılarına `system=` ve `thinking=` parametreleri eklendi
+
+### Sistem Prompt İçeriği
+- Kimlik: T-TARS (Trading - Technical Analysis & Risk System)
+- Uzmanlık: Kripto futures, likidite analizi, OB/FVG tespiti
+- Metodoloji: ICT/SMC konseptleri
+- Karar prensipleri: ENTER/SKIP/WAIT kriterleri
+
+### Teknik Detaylar
+- `SYSTEM_PROMPT` sabiti eklendi (global)
+- `analyze()` ve `evaluate_setup()` metodları güncellendi
+- User prompt'tan rol tanımı çıkarıldı (artık sistem prompt'ta)
+- Max tokens: 256 → 16000 (thinking için)
+
+---
+
+## v2.4.13 (2024-12-29)
+
+### Değişiklikler
+- **REMOVED:** XAUTUSDT auto-scan'den çıkarıldı (yüksek fonlama oranı)
+- **ADDED:** 5 yeni coin eklendi:
+  - LTCUSDT (Litecoin)
+  - SUIUSDT (Sui)
+  - ADAUSDT (Cardano)
+  - AVAXUSDT (Avalanche)
+  - HYPEUSDT (Hype)
+- **Toplam:** 14 coin aktif
+
+### PineScript v14
+- XAU çıkarıldı
+- LTC, SUI, ADA, AVAX, HYPE eklendi
+- 15m ve 1h scanner güncellendi
+
+---
+
 ## v2.4.12 (2025-12-26) - Limit Order Güvenlik Kontrolü FIX
 
 ### 🐛 FIX - Adjust Çakışması Giderildi

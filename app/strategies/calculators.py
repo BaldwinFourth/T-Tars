@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.4.10
+T-TARS Trading Calculators v2.4.11
 ===================================
+v2.5.0:
+- OPTİMİZASYON: Volume, FVG, OB, RR threshold güncellendi. 
+
+v2.4.11:
+- FIX: Yorum düzeltmeleri (FVG zone %70-90)
+
 v2.4.10:
 - CHANGED: MIN_RR_RATIO = 3.0 (eskiden 2.0)
 - CHANGED: TP_MULTIPLIER = 3.0 (tek TP, eskiden TP1=2.0/TP2=4.0)
@@ -9,16 +15,11 @@ v2.4.10:
 
 v2.4.0:
 - NEW: calculate_pdc_bias() - PDC bazlı bias + Doji kontrolü
-- NEW: calculate_fibo_zones() - Fibo %60-90 ve %70-90 zone hesabı
+- NEW: calculate_fibo_zones() - Fibo %70-90 zone hesabı
 - NEW: is_in_ob_zone() - OB için %70-90 kontrolü
-- NEW: is_in_fvg_zone() - FVG için %60-90 kontrolü
+- NEW: is_in_fvg_zone() - FVG için %70-90 kontrolü
 - NEW: check_doji() - Tek mum doji kontrolü
-- NEW: MIN_OB_SIZE_ATR = 1.0, MIN_FVG_SIZE_ATR = 1.0
-
-v2.3.11:
-- CHANGED: calculate_setup_strength() 4 parametre → 3 parametre
-- REMOVED: confidence parametresi (circular logic fix)
-- NEW: Volume VETO - düşük volume = max LOW confidence garantisi
+- NEW: MIN_OB_SIZE_ATR = 1.2, MIN_FVG_SIZE_ATR = 1.2
 """
 
 # ============================================
@@ -39,20 +40,20 @@ RR_MINIMUM = 3.0           # Minimum
 # ============================================
 # R:R SCORES (Fine tuning buradan)
 # ============================================
-SCORE_RR_EXCELLENT = 1.25  # Bonus
+SCORE_RR_EXCELLENT = 1.50  # Bonus
 SCORE_RR_GOOD = 1.00
-SCORE_RR_MEDIUM = 0.95
-SCORE_RR_MINIMUM = 0.75
+SCORE_RR_MEDIUM = 0.65
+SCORE_RR_MINIMUM = 0.50
 SCORE_RR_ELSE = 0.20
 
 # ============================================
 # VOLUME THRESHOLDS (Fine tuning buradan)
 # ============================================
-VOLUME_TRADEABLE_MIN = 0.65 # Minimum tradeable (bu altı = reject)
+VOLUME_TRADEABLE_MIN = 0.70 # Minimum tradeable (bu altı = reject)
 VOLUME_LOW = 0.8           # Düşük ama kabul edilebilir
 VOLUME_MEDIUM = 1.5        # Orta
-VOLUME_GOOD = 1.8          # İyi
-VOLUME_EXCELLENT = 2.0     # Mükemmel volume spike
+VOLUME_GOOD = 2.0          # İyi
+VOLUME_EXCELLENT = 2.5     # Mükemmel volume spike
 
 # Volume Spike Flag (boolean için) - bitget_service kullanıyor
 VOLUME_SPIKE_FLAG = 1.5    # spike_ratio >= bu değer → spike=True
@@ -66,17 +67,17 @@ VOLUME_STRENGTH_MEDIUM = 2.0 # >= 2.0 → 'medium'
 # VOLUME SCORES (Fine tuning buradan)
 # ============================================
 SCORE_VOLUME_EXCELLENT = 1.50  # Bonus
-SCORE_VOLUME_GOOD = 1.10
+SCORE_VOLUME_GOOD = 1.20
 SCORE_VOLUME_MEDIUM = 0.80
-SCORE_VOLUME_LOW = 0.55
+SCORE_VOLUME_LOW = 0.60
 SCORE_VOLUME_ELSE = 0.3
 
 # ============================================
 # OB/FVG STRENGTH MAPPING (Fine tuning buradan)
 # ============================================
 STRENGTH_MAP = {
-    'high': 1.35,    # Bonus
-    'medium': 0.75,
+    'high': 1.25,    # Bonus
+    'medium': 0.65,
     'low': 0.30
 }
 
@@ -88,26 +89,26 @@ DEFAULT_STRENGTH_SCORE = 0.10   # Bilinmeyen strength için
 # ============================================
 # WEIGHT DISTRIBUTION (Fine tuning buradan)
 # ============================================
-WEIGHT_VOLUME = 0.40       # Volume ağırlığı - EN KRİTİK
-WEIGHT_STRENGTH = 0.40     # OB/FVG gücü ağırlığı
-WEIGHT_RR = 0.20           # Risk:Reward ağırlığı
+WEIGHT_VOLUME = 0.45       # Volume ağırlığı - EN KRİTİK
+WEIGHT_STRENGTH = 0.45     # OB/FVG gücü ağırlığı
+WEIGHT_RR = 0.10           # Risk:Reward ağırlığı
 # Toplam = 1.0
 
 # Volume Veto Threshold
-VOLUME_VETO_MAX_SCORE = 0.50  # Volume < VOLUME_LOW ise max bu score
+VOLUME_VETO_MAX_SCORE = 0.65  # Volume < VOLUME_LOW ise max bu score
 
 # ============================================
 # v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
 # ============================================
-MIN_OB_SIZE_ATR = 1.2      # OB en az 1.0 ATR olmalı
-MIN_FVG_SIZE_ATR = 1.2     # FVG en az 1.0 ATR olmalı
+MIN_OB_SIZE_ATR = 1.5      # OB en az 1.2 ATR olmalı
+MIN_FVG_SIZE_ATR = 2.0     # FVG en az 1.2 ATR olmalı
 
 # ============================================
 # v2.4.0: FİBO ZONE TANIMLARI
 # ============================================
 OB_ZONE_MIN = 0.70         # OB arama: %70-90
 OB_ZONE_MAX = 0.90
-FVG_ZONE_MIN = 0.70        # FVG arama: %60-90
+FVG_ZONE_MIN = 0.70        # FVG arama: %70-90
 FVG_ZONE_MAX = 0.90
 
 # ============================================
@@ -336,7 +337,7 @@ def calculate_fibo_zones(pdc, bias):
             'fib_0': float,      # 0% seviyesi
             'fib_100': float,    # 100% seviyesi
             'ob_zone': (low, high),   # OB arama bölgesi (%70-90)
-            'fvg_zone': (low, high),  # FVG arama bölgesi (%60-90)
+            'fvg_zone': (low, high),  # FVG arama bölgesi (%70-90)
             'fib_levels': {...}  # Tüm fibo seviyeleri
         }
     """
@@ -389,9 +390,9 @@ def calculate_fibo_zones(pdc, bias):
     ob_low = min(fib_levels['70'], fib_levels['90'])
     ob_high = max(fib_levels['70'], fib_levels['90'])
     
-    # FVG Zone: %60-90
-    fvg_low = min(fib_levels['60'], fib_levels['90'])
-    fvg_high = max(fib_levels['60'], fib_levels['90'])
+    # FVG Zone: %70-90
+    fvg_low = min(fib_levels['70'], fib_levels['90'])
+    fvg_high = max(fib_levels['70'], fib_levels['90'])
     
     return {
         'fib_0': fib_0,
@@ -424,7 +425,7 @@ def is_in_ob_zone(price, fibo_data):
 
 def is_in_fvg_zone(price, fibo_data):
     """
-    Fiyatın FVG zone'unda (%60-90) olup olmadığını kontrol et.
+    Fiyatın FVG zone'unda (%70-90) olup olmadığını kontrol et.
     
     Args:
         price: Kontrol edilecek fiyat (FVG mid-point)

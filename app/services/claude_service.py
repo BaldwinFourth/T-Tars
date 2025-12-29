@@ -150,7 +150,7 @@ class ClaudeService:
         try:
             response = self.client.messages.create(
                 model=Config.CLAUDE_MODEL,
-                max_tokens=24000,
+                max_tokens=16000,
                 system=SYSTEM_PROMPT,
                 thinking={
                     "type": "enabled",
@@ -708,7 +708,7 @@ SADECE JSON formatında cevap ver:
             
             response = self.client.messages.create(
                 model=Config.CLAUDE_MODEL,
-                max_tokens=24000,
+                max_tokens=16000,
                 system=SYSTEM_PROMPT,
                 thinking={
                     "type": "enabled",

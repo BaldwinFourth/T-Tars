@@ -58,7 +58,7 @@ class Config:
     # ============================================
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
     CLAUDE_MODEL = os.getenv('CLAUDE_MODEL', 'claude-haiku-4-5-20251001')
-    THINKING_BUDGET = int(os.getenv('THINKING_BUDGET', '20000'))
+    THINKING_BUDGET = int(os.getenv('THINKING_BUDGET', '10000'))
     
     # ============================================
     # CLOUD STORAGE

@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Strategies v2.4.10
+T-TARS Strategies v2.5.1
 ==========================
 Trading strategy modülleri.
+
+v2.5.1:
+- ADDED: OB_LOOKBACK, FVG_LOOKBACK export
+- ADDED: MAX_OB_COUNT, MAX_FVG_COUNT export
+- ADDED: MAX_ENTRY_DISTANCE_PERCENT export
 
 v2.4.10:
 - CHANGED: TP1_MULTIPLIER, TP2_MULTIPLIER → TP_MULTIPLIER (tek TP sistemi)
@@ -11,7 +16,7 @@ v2.4.0:
 - NEW: calculate_pdc_bias - PDC bazlı bias belirleme
 - NEW: calculate_fibo_zones - Fibo zone hesaplama
 - NEW: is_in_ob_zone - OB %70-90 zone kontrolü
-- NEW: is_in_fvg_zone - FVG %60-90 zone kontrolü
+- NEW: is_in_fvg_zone - FVG %50-150 zone kontrolü
 - NEW: check_doji - Doji kontrolü
 - NEW: MIN_OB_SIZE_ATR, MIN_FVG_SIZE_ATR constants
 - NEW: OB_ZONE_MIN/MAX, FVG_ZONE_MIN/MAX, DOJI_BODY_THRESHOLD constants
@@ -54,6 +59,12 @@ from .calculators import (
     FVG_ZONE_MIN,
     FVG_ZONE_MAX,
     DOJI_BODY_THRESHOLD,
+    # v2.5.1: Lookback & Entry Distance constants
+    OB_LOOKBACK,
+    FVG_LOOKBACK,
+    MAX_ENTRY_DISTANCE_PERCENT,
+    MAX_OB_COUNT,
+    MAX_FVG_COUNT,
 )
 
 from .ob_detector import (
@@ -129,6 +140,12 @@ __all__ = [
     'FVG_ZONE_MIN',
     'FVG_ZONE_MAX',
     'DOJI_BODY_THRESHOLD',
+    # Calculators - Lookback & Entry Distance (v2.5.1)
+    'OB_LOOKBACK',
+    'FVG_LOOKBACK',
+    'MAX_ENTRY_DISTANCE_PERCENT',
+    'MAX_OB_COUNT',
+    'MAX_FVG_COUNT',
     # OB Detector
     'scan_order_blocks',
     'detect_ob_long',

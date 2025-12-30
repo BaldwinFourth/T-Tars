@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS OB Detector v2.4.10
+T-TARS OB Detector v2.5.1
 ===========================
 Order Block setup detection (Scanning + Validation)
+
+v2.5.1:
+- CHANGED: OB_LOOKBACK, MAX_OB_COUNT, MAX_ENTRY_DISTANCE_PERCENT calculators'dan import
+- REMOVED: Hardcoded sabitler kaldırıldı (DRY prensibi)
 
 v2.4.10:
 - CHANGED: Tek TP sistemi (tp1_price/tp2_price → tp_price)
@@ -13,9 +17,6 @@ v2.4.0:
 - NEW: Minimum boyut filtresi (≥1.0 ATR)
 - NEW: En yakın 4 OB döndür (noise reduction)
 - NEW: current_price parametresi scan_order_blocks'a eklendi
-
-v2.3.11:
-- CHANGED: calculate_setup_strength() 3 parametre (confidence kaldırıldı)
 
 Formül (v2.4.10):
 LONG:  Entry = (OB_H + OB_L) / 2, Stop = Entry - ATR, TP = Entry + 3*ATR
@@ -29,19 +30,24 @@ from app.strategies.calculators import (
     MIN_RR_RATIO,
     TP_MULTIPLIER,
     VOLUME_TRADEABLE_MIN,
-    MIN_OB_SIZE_ATR
+    MIN_OB_SIZE_ATR,
+    # v2.5.1: Yeni import'lar
+    OB_LOOKBACK,
+    MAX_OB_COUNT,
+    MAX_ENTRY_DISTANCE_PERCENT
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
 
-MAX_ENTRY_DISTANCE_PERCENT = 3.0
-MAX_OB_COUNT = 4
-
 
 def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
     """
     Mum verilerini tarayarak potansiyel Order Block'ları bulur.
+    
+    v2.5.1:
+    - OB_LOOKBACK calculators'dan import (300 bar)
+    - MAX_OB_COUNT calculators'dan import (4)
     
     v2.4.0:
     - Boyut filtresi: OB boyutu >= 1.0 ATR olmalı
@@ -54,7 +60,7 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
         current_price: Güncel fiyat (sıralama için)
     
     Returns:
-        list: En yakın 4 OB (boyut filtresinden geçenler)
+        list: En yakın MAX_OB_COUNT OB (boyut filtresinden geçenler)
     """
     obs = []
     try:
@@ -62,7 +68,8 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
             logger.debug(f"OB Scan [{timeframe_str}]: Yetersiz mum ({len(ohlcv)})")
             return []
         
-        lookback_data = ohlcv[-50:]
+        # v2.5.1: calculators'dan import edilen OB_LOOKBACK kullan
+        lookback_data = ohlcv[-OB_LOOKBACK:]
         
         for i in range(2, len(lookback_data)-1):
             prev = lookback_data[i-1]
@@ -115,7 +122,7 @@ def scan_order_blocks(ohlcv, timeframe_str, atr=0, current_price=0):
                         'volume_confirmed': True
                     })
         
-        # Fiyata en yakın 4 OB'yi seç
+        # Fiyata en yakın MAX_OB_COUNT OB'yi seç
         if current_price > 0 and len(obs) > MAX_OB_COUNT:
             obs = sorted(obs, key=lambda x: abs(x['mid'] - current_price))[:MAX_OB_COUNT]
             logger.debug(f"📦 OB Scan [{timeframe_str}]: {len(obs)} OB (filtered to closest {MAX_OB_COUNT})")
@@ -153,6 +160,7 @@ def detect_ob_long(ob, volume, atr, timeframe, current_price, pair=""):
         entry_price = (ob['low'] + ob['high']) / 2
         entry_zone = f"{format_price(ob['low'])} - {format_price(ob['high'])}"
         
+        # v2.5.1: calculators'dan import edilen MAX_ENTRY_DISTANCE_PERCENT kullan
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
@@ -227,6 +235,7 @@ def detect_ob_short(ob, volume, atr, timeframe, current_price, pair=""):
         entry_price = (ob['low'] + ob['high']) / 2
         entry_zone = f"{format_price(ob['low'])} - {format_price(ob['high'])}"
         
+        # v2.5.1: calculators'dan import edilen MAX_ENTRY_DISTANCE_PERCENT kullan
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:

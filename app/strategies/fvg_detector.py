@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS FVG Detector v2.4.10
+T-TARS FVG Detector v2.5.1
 ============================
 Fair Value Gap setup detection (Scanning + Validation)
+
+v2.5.1:
+- CHANGED: FVG_LOOKBACK, MAX_FVG_COUNT, MAX_ENTRY_DISTANCE_PERCENT calculators'dan import
+- REMOVED: Hardcoded sabitler kaldırıldı (DRY prensibi)
 
 v2.4.10:
 - CHANGED: TP1/TP2 kaldırıldı → Tek TP (3.0 ATR)
@@ -25,21 +29,26 @@ from app.strategies.calculators import (
     calculate_setup_strength,
     format_price,
     MIN_RR_RATIO,
-    TP_MULTIPLIER,  # v2.4.10: Tek TP multiplier
+    TP_MULTIPLIER,
     VOLUME_TRADEABLE_MIN,
-    MIN_FVG_SIZE_ATR
+    MIN_FVG_SIZE_ATR,
+    # v2.5.1: Yeni import'lar
+    FVG_LOOKBACK,
+    MAX_FVG_COUNT,
+    MAX_ENTRY_DISTANCE_PERCENT
 )
 from app.strategies.volume_analyzer import analyze_volume
 
 logger = logging.getLogger(__name__)
 
-MAX_ENTRY_DISTANCE_PERCENT = 3.0
-MAX_FVG_COUNT = 4  # v2.4.0: En fazla 4 FVG döndür
-
 
 def scan_fair_value_gaps(ohlcv, timeframe_str, atr=0, current_price=0):
     """
     Mum verilerini tarayarak potansiyel FVG'leri bulur.
+    
+    v2.5.1:
+    - FVG_LOOKBACK calculators'dan import (300 bar)
+    - MAX_FVG_COUNT calculators'dan import (4)
     
     v2.4.0:
     - Boyut filtresi: FVG gap boyutu >= 1.0 ATR olmalı
@@ -52,7 +61,7 @@ def scan_fair_value_gaps(ohlcv, timeframe_str, atr=0, current_price=0):
         current_price: Güncel fiyat (sıralama için)
     
     Returns:
-        list: En yakın 4 FVG (boyut filtresinden geçenler)
+        list: En yakın MAX_FVG_COUNT FVG (boyut filtresinden geçenler)
     """
     fvgs = []
     try:
@@ -60,7 +69,8 @@ def scan_fair_value_gaps(ohlcv, timeframe_str, atr=0, current_price=0):
             logger.debug(f"FVG Scan [{timeframe_str}]: Yetersiz mum ({len(ohlcv)})")
             return []
         
-        lookback_data = ohlcv[-50:]
+        # v2.5.1: calculators'dan import edilen FVG_LOOKBACK kullan
+        lookback_data = ohlcv[-FVG_LOOKBACK:]
         
         for i in range(1, len(lookback_data)-1):
             prev = lookback_data[i-1]
@@ -111,12 +121,12 @@ def scan_fair_value_gaps(ohlcv, timeframe_str, atr=0, current_price=0):
                         'strength': 'high' if gap_size > (curr[2] - curr[3]) * 0.5 else 'medium'
                     })
         
-        # v2.4.0: Fiyata en yakın 4 FVG'yi seç
+        # v2.5.1: Fiyata en yakın MAX_FVG_COUNT FVG'yi seç
         if current_price > 0 and len(fvgs) > MAX_FVG_COUNT:
             fvgs = sorted(fvgs, key=lambda x: abs(x['mid'] - current_price))[:MAX_FVG_COUNT]
             logger.debug(f"📊 FVG Scan [{timeframe_str}]: {len(fvgs)} FVG (filtered to closest {MAX_FVG_COUNT})")
         elif fvgs:
-            fvgs = fvgs[-MAX_FVG_COUNT:]  # Son 4'ü al
+            fvgs = fvgs[-MAX_FVG_COUNT:]  # Son MAX_FVG_COUNT'u al
             logger.debug(f"📊 FVG Scan [{timeframe_str}]: {len(fvgs)} FVG bulundu")
         
         return fvgs
@@ -151,6 +161,7 @@ def detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair=""):
         
         entry_price = (gap_low + gap_high) / 2
         
+        # v2.5.1: calculators'dan import edilen MAX_ENTRY_DISTANCE_PERCENT kullan
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:
@@ -227,6 +238,7 @@ def detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair=""):
         
         entry_price = (gap_low + gap_high) / 2
         
+        # v2.5.1: calculators'dan import edilen MAX_ENTRY_DISTANCE_PERCENT kullan
         if current_price > 0:
             distance_percent = abs(entry_price - current_price) / current_price * 100
             if distance_percent > MAX_ENTRY_DISTANCE_PERCENT:

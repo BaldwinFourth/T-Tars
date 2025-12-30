@@ -1,17 +1,48 @@
-# T-TARS Changelog
+# T-TARS - CHANGELOG
 
 ## v2.5.1 (2025-12-30)
 
-### 🔄 Changed
-- **FVG Zone**: %70-90 → %50-150 (PDC içi + dışı)
-- **Fibo Hesaplama**: Bias-aware (yöne göre ters çekilir)
-  - LONG (Yeşil PDC): Fibo 0=Low, 100=High, extension yukarı
-  - SHORT (Kırmızı PDC): Fibo 0=High, 100=Low, extension aşağı
-- **is_in_fvg_zone()**: direction parametresi eklendi
+### 📊 FVG Zone Genişletme
+- **CHANGED:** FVG Zone %70-90 → %50-150 (PDC içi + dışı extension)
+- **CHANGED:** `FVG_ZONE_MIN = 0.50`, `FVG_ZONE_MAX = 1.50`
+- OB Zone değişmedi: %70-90 (PDC içi retracement)
 
-### 📁 Güncellenen Dosyalar
-- `calculators.py` - FVG_ZONE_MIN=0.50, FVG_ZONE_MAX=1.50, bias-aware hesaplama
-- `setup_detector.py` - Direction bazlı FVG filtreleme
+### 🧭 Bias-Aware Fibonacci Hesaplama
+- **CHANGED:** `calculate_fibo_zones()` artık bias'a göre yön belirliyor
+  - **LONG (Yeşil PDC):** Fibo 0 = PDC Low, 100 = PDC High, extension yukarı
+  - **SHORT (Kırmızı PDC):** Fibo 0 = PDC High, 100 = PDC Low, extension aşağı
+- **CHANGED:** `is_in_fvg_zone()` artık `direction` parametresi alıyor
+  - LONG FVG → `fvg_zone_long` kullanır
+  - SHORT FVG → `fvg_zone_short` kullanır
+
+### 🔧 DRY Refactor - Merkezi Sabit Yönetimi
+**calculators.py'ye Eklenenler:**
+- `OB_LOOKBACK = 300` - OB arama lookback (eskiden hardcoded 50)
+- `FVG_LOOKBACK = 300` - FVG arama lookback (eskiden hardcoded 50)
+- `MAX_ENTRY_DISTANCE_PERCENT = 3.0` - Entry max %3 uzaklıkta
+- `MAX_OB_COUNT = 4` - En fazla 4 OB döndür
+- `MAX_FVG_COUNT = 4` - En fazla 4 FVG döndür
+
+**ob_detector.py:**
+- REMOVED: Hardcoded `MAX_ENTRY_DISTANCE_PERCENT`, `MAX_OB_COUNT`
+- REMOVED: Hardcoded `lookback_data = ohlcv[-50:]`
+- ADDED: calculators'dan import
+
+**fvg_detector.py:**
+- REMOVED: Hardcoded `MAX_ENTRY_DISTANCE_PERCENT`, `MAX_FVG_COUNT`
+- REMOVED: Hardcoded `lookback_data = ohlcv[-50:]`
+- ADDED: calculators'dan import
+
+**strategies/__init__.py:**
+- ADDED: `OB_LOOKBACK`, `FVG_LOOKBACK` export
+- ADDED: `MAX_OB_COUNT`, `MAX_FVG_COUNT` export
+- ADDED: `MAX_ENTRY_DISTANCE_PERCENT` export
+
+### 📈 Lookback Değişikliği
+| Değer | Eski | Yeni | 15m'de | 1h'de |
+|-------|------|------|--------|-------|
+| OB Lookback | 50 bar | 300 bar | ~3 gün | ~12 gün |
+| FVG Lookback | 50 bar | 300 bar | ~3 gün | ~12 gün |
 
 ---
 

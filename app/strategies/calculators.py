@@ -111,6 +111,19 @@ MIN_OB_SIZE_ATR = 1.3      # OB en az 1.3 ATR olmalı
 MIN_FVG_SIZE_ATR = 1.5     # FVG en az 1.5 ATR olmalı
 
 # ============================================
+# v2.5.1: LOOKBACK & ENTRY DISTANCE
+# ============================================
+OB_LOOKBACK = 300                  # OB arama: 15m ~3 gün, 1h ~12 gün
+FVG_LOOKBACK = 300                 # FVG arama: 15m ~3 gün, 1h ~12 gün
+MAX_ENTRY_DISTANCE_PERCENT = 3.0   # Entry max %3 uzaklıkta olmalı
+
+# ============================================
+# v2.5.1: MAX ZONE COUNTS
+# ============================================
+MAX_OB_COUNT = 4                   # En fazla 4 OB döndür
+MAX_FVG_COUNT = 4                  # En fazla 4 FVG döndür
+
+# ============================================
 # v2.5.1: FİBO ZONE TANIMLARI (UPDATED!)
 # ============================================
 # OB Zone: PDC içi retracement (%70-90)

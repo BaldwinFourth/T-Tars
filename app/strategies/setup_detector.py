@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v2.4.1
+T-TARS Setup Detector v2.5.1
 =============================
 Trading setup orchestrator with PDC bias + Fibo zone filtering.
+
+v2.5.1:
+- CHANGED: FVG zone %50-150 (PDC içi + dışı)
+- CHANGED: is_in_fvg_zone() artık direction parametresi alıyor
+- CHANGED: Bias-aware fibo hesaplama
+  - LONG: 0=Low, 100=High, extension yukarı
+  - SHORT: 0=High, 100=Low, extension aşağı
 
 v2.4.1:
 - ADDED: Detaylı log'lar (Fibo zone reject, Bias mismatch, PDC is_doji)
@@ -11,7 +18,7 @@ v2.4.1:
 
 v2.4.0:
 - NEW: PDC bias belirleme (yeşil=LONG, kırmızı=SHORT)
-- NEW: Fibo zone filtreleme (OB: %70-90, FVG: %60-90)
+- NEW: Fibo zone filtreleme (OB: %70-90, FVG: %100-150)
 - NEW: Doji reversal kontrolü
 - NEW: scan_order_blocks ve scan_fair_value_gaps'a atr/current_price geçiliyor
 - CHANGED: Import'lara calculate_pdc_bias, calculate_fibo_zones, is_in_ob_zone, is_in_fvg_zone eklendi
@@ -29,7 +36,9 @@ from app.strategies.calculators import (
     calculate_pdc_bias,
     calculate_fibo_zones,
     is_in_ob_zone,
-    is_in_fvg_zone
+    is_in_fvg_zone,
+    FVG_ZONE_MIN,
+    FVG_ZONE_MAX
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +51,7 @@ def detect_trading_setup(pair, market_data):
     """
     Otomatik tarama için - Tek setup döndürür.
     
-    v2.4.0: PDC bias + Fibo zone + Doji kontrolü
+    v2.5.1: FVG zone %100-150 extension (PDC dışı)
     """
     try:
         if not market_data:
@@ -83,31 +92,42 @@ def detect_trading_setup(pair, market_data):
         fvgs = market_data['smart_money']['fair_value_gaps'].get(timeframe, [])
         atr = market_data['atr'].get(timeframe, 0)
         
-        # v2.4.0: Fibo zone filtresi
+        # v2.5.1: Fibo zone filtresi (FVG için direction bazlı)
         if fibo_data:
             obs_before = len(obs)
             fvgs_before = len(fvgs)
             
-            # OB filtreleme (detaylı log ile)
+            # OB filtreleme (detaylı log ile) - %70-90 PDC içi
             filtered_obs = []
             for ob in obs:
                 ob_mid = ob.get('mid', (ob['high']+ob['low'])/2)
                 if is_in_ob_zone(ob_mid, fibo_data):
                     filtered_obs.append(ob)
                 else:
-                    fibo_pct = ((fibo_data['pdc_high'] - ob_mid) / (fibo_data['pdc_high'] - fibo_data['pdc_low'])) * 100 if fibo_data['pdc_high'] != fibo_data['pdc_low'] else 0
+                    pdc_range = fibo_data['pdc_high'] - fibo_data['pdc_low']
+                    if pdc_range > 0:
+                        fibo_pct = ((ob_mid - fibo_data['pdc_low']) / pdc_range) * 100
+                    else:
+                        fibo_pct = 0
                     logger.info(f"📐 {pair}: OB {ob['type']} [{timeframe}] REJECTED - Fibo %{fibo_pct:.1f} (zone: %70-90)")
             obs = filtered_obs
             
-            # FVG filtreleme (detaylı log ile)
+            # FVG filtreleme (v2.5.1: direction bazlı, %100-150 extension)
             filtered_fvgs = []
             for fvg in fvgs:
                 fvg_mid = fvg.get('mid', (fvg['high']+fvg['low'])/2)
-                if is_in_fvg_zone(fvg_mid, fibo_data):
+                fvg_direction = 'LONG' if fvg['type'] == 'bullish' else 'SHORT'
+                
+                if is_in_fvg_zone(fvg_mid, fibo_data, fvg_direction):
                     filtered_fvgs.append(fvg)
                 else:
-                    fibo_pct = ((fibo_data['pdc_high'] - fvg_mid) / (fibo_data['pdc_high'] - fibo_data['pdc_low'])) * 100 if fibo_data['pdc_high'] != fibo_data['pdc_low'] else 0
-                    logger.info(f"📐 {pair}: FVG {fvg['type']} [{timeframe}] REJECTED - Fibo %{fibo_pct:.1f} (zone: %60-90)")
+                    pdc_range = fibo_data['pdc_high'] - fibo_data['pdc_low']
+                    if pdc_range > 0:
+                        fibo_pct = ((fvg_mid - fibo_data['pdc_low']) / pdc_range) * 100
+                    else:
+                        fibo_pct = 0
+                    zone_str = f"%{int(FVG_ZONE_MIN*100)}-{int(FVG_ZONE_MAX*100)}"
+                    logger.info(f"📐 {pair}: FVG {fvg['type']} [{timeframe}] REJECTED - Fibo %{fibo_pct:.1f} (zone: {zone_str})")
             fvgs = filtered_fvgs
             
             if obs_before > len(obs) or fvgs_before > len(fvgs):
@@ -171,7 +191,7 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
     """
     Belirli bir timeframe için setup kontrol et.
     
-    v2.4.0: Fibo zone filtresi eklendi
+    v2.5.1: FVG zone direction bazlı filtreleme
     """
     setups = []
     try:
@@ -180,10 +200,14 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
         fvgs = market_data['smart_money']['fair_value_gaps'].get(timeframe, [])
         atr = market_data['atr'].get(timeframe, 0)
         
-        # v2.4.0: Fibo zone filtresi
+        # v2.5.1: Fibo zone filtresi (direction bazlı)
         if fibo_data:
             obs = [ob for ob in obs if is_in_ob_zone(ob.get('mid', (ob['high']+ob['low'])/2), fibo_data)]
-            fvgs = [fvg for fvg in fvgs if is_in_fvg_zone(fvg.get('mid', (fvg['high']+fvg['low'])/2), fibo_data)]
+            fvgs = [fvg for fvg in fvgs if is_in_fvg_zone(
+                fvg.get('mid', (fvg['high']+fvg['low'])/2), 
+                fibo_data, 
+                'LONG' if fvg['type'] == 'bullish' else 'SHORT'
+            )]
         
         logger.debug(f"🕐 {pair} [{timeframe}]: OB={len(obs)}, FVG={len(fvgs)}, Vol={volume.get('spike_ratio', 0):.2f}x")
         
@@ -231,7 +255,7 @@ def scan_setups(pair, market_data):
     """
     Tüm timeframe'leri tarayarak setup bul.
     
-    v2.4.0: PDC bias + Fibo zone + Doji kontrolü
+    v2.5.1: FVG zone %100-150 extension
     """
     try:
         if not market_data:

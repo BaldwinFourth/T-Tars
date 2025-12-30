@@ -1,7 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.4.11
+T-TARS Trading Calculators v2.5.1
 ===================================
+v2.5.1:
+- CHANGED: FVG_ZONE_MIN = 0.50, FVG_ZONE_MAX = 1.50 (PDC içi + dışı)
+- CHANGED: calculate_fibo_zones() - Bias-aware fibo hesabı
+  - LONG: Fibo 0=Low, 100=High, extension yukarı
+  - SHORT: Fibo 0=High, 100=Low, extension aşağı
+- CHANGED: is_in_fvg_zone() - Bias'a göre zone kontrolü
+
 v2.5.0:
 - OPTİMİZASYON: Volume, FVG, OB, RR threshold güncellendi. 
 
@@ -100,16 +107,19 @@ VOLUME_VETO_MAX_SCORE = 0.65  # Volume < VOLUME_LOW ise max bu score
 # ============================================
 # v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
 # ============================================
-MIN_OB_SIZE_ATR = 1.5      # OB en az 1.2 ATR olmalı
-MIN_FVG_SIZE_ATR = 2.0     # FVG en az 1.2 ATR olmalı
+MIN_OB_SIZE_ATR = 1.3      # OB en az 1.3 ATR olmalı
+MIN_FVG_SIZE_ATR = 1.5     # FVG en az 1.5 ATR olmalı
 
 # ============================================
-# v2.4.0: FİBO ZONE TANIMLARI
+# v2.5.1: FİBO ZONE TANIMLARI (UPDATED!)
 # ============================================
+# OB Zone: PDC içi retracement (%70-90)
 OB_ZONE_MIN = 0.70         # OB arama: %70-90
 OB_ZONE_MAX = 0.90
-FVG_ZONE_MIN = 0.70        # FVG arama: %70-90
-FVG_ZONE_MAX = 0.90
+
+# FVG Zone: PDC içi + dışı (%50-150)
+FVG_ZONE_MIN = 0.50        # v2.5.1: %50 (PDC orta noktası)
+FVG_ZONE_MAX = 1.50        # v2.5.1: %150 (PDC dışı extension)
 
 # ============================================
 # v2.4.0: DOJİ THRESHOLD
@@ -321,12 +331,20 @@ def calculate_pdc_bias(daily_ohlcv):
 
 
 # ============================================
-# v2.4.0: FİBO ZONE FONKSİYONLARI
+# v2.5.1: FİBO ZONE FONKSİYONLARI (UPDATED!)
 # ============================================
 
 def calculate_fibo_zones(pdc, bias):
     """
     PDC ve bias'a göre Fibo zone'larını hesapla.
+    
+    v2.5.1 GÜNCELLEME:
+    - OB Zone: %70-90 (PDC içi retracement) - DEĞİŞMEDİ
+    - FVG Zone: %50-150 (PDC içi + dışı extension)
+    
+    Fibo Yönü (Bias'a göre):
+    - LONG (Yeşil PDC): 0 = PDC Low, 100 = PDC High, extension yukarı
+    - SHORT (Kırmızı PDC): 0 = PDC High, 100 = PDC Low, extension aşağı
     
     Args:
         pdc: {'open', 'high', 'low', 'close', 'type'}
@@ -334,11 +352,14 @@ def calculate_fibo_zones(pdc, bias):
     
     Returns:
         {
-            'fib_0': float,      # 0% seviyesi
-            'fib_100': float,    # 100% seviyesi
-            'ob_zone': (low, high),   # OB arama bölgesi (%70-90)
-            'fvg_zone': (low, high),  # FVG arama bölgesi (%70-90)
-            'fib_levels': {...}  # Tüm fibo seviyeleri
+            'fib_0': float,
+            'fib_100': float,
+            'ob_zone': (low, high),       # OB: %70-90 (PDC içi)
+            'fvg_zone_long': (low, high), # FVG LONG: %50-150 yukarı
+            'fvg_zone_short': (low, high),# FVG SHORT: %50-150 aşağı
+            'fib_levels': {...},
+            'pdc_high': float,
+            'pdc_low': float
         }
     """
     high = pdc['high']
@@ -350,55 +371,59 @@ def calculate_fibo_zones(pdc, bias):
             'fib_0': low,
             'fib_100': high,
             'ob_zone': (low, high),
-            'fvg_zone': (low, high),
+            'fvg_zone_long': (high, high),
+            'fvg_zone_short': (low, low),
             'fib_levels': {},
             'pdc_high': high,
             'pdc_low': low
         }
     
-    # Fibo yönü bias'a göre
-    if bias == 'LONG':
-        # Yeşil PDC: 0 altta, 100 üstte
-        fib_0 = low
-        fib_100 = high
-    else:
-        # Kırmızı PDC: 0 üstte, 100 altta (ters çevrilmiş)
-        fib_0 = high
-        fib_100 = low
+    # ============================================
+    # OB Zone: %70-90 (PDC içi, sabit hesaplama)
+    # Her zaman PDC low'dan yukarı hesaplanır
+    # ============================================
+    ob_70 = low + (diff * OB_ZONE_MIN)  # %70
+    ob_90 = low + (diff * OB_ZONE_MAX)  # %90
+    ob_zone = (min(ob_70, ob_90), max(ob_70, ob_90))
     
-    # Fibo seviyeleri hesapla
-    def calc_level(pct):
-        if bias == 'LONG':
-            return low + (diff * pct)
-        else:
-            return high - (diff * pct)
+    # ============================================
+    # FVG Zone: %50-150 (Bias'a göre yön değişir)
+    # ============================================
     
+    # LONG/Bullish FVG Zone (Yeşil PDC mantığı):
+    # Fibo 0 = PDC Low, Fibo 100 = PDC High
+    # %50 = PDC orta, %150 = PDC High + %50 range (yukarı extension)
+    fvg_long_50 = low + (diff * FVG_ZONE_MIN)   # %50
+    fvg_long_150 = low + (diff * FVG_ZONE_MAX)  # %150 (yukarı extension)
+    fvg_zone_long = (min(fvg_long_50, fvg_long_150), max(fvg_long_50, fvg_long_150))
+    
+    # SHORT/Bearish FVG Zone (Kırmızı PDC mantığı):
+    # Fibo 0 = PDC High, Fibo 100 = PDC Low
+    # %50 = PDC orta, %150 = PDC Low - %50 range (aşağı extension)
+    fvg_short_50 = high - (diff * FVG_ZONE_MIN)   # %50 (high'dan aşağı)
+    fvg_short_150 = high - (diff * FVG_ZONE_MAX)  # %150 (aşağı extension)
+    fvg_zone_short = (min(fvg_short_50, fvg_short_150), max(fvg_short_50, fvg_short_150))
+    
+    # Fibo seviyeleri (referans için - LONG yönünde)
     fib_levels = {
-        '0': calc_level(0),
-        '23.6': calc_level(0.236),
-        '38.2': calc_level(0.382),
-        '50': calc_level(0.5),
-        '60': calc_level(0.6),
-        '61.8': calc_level(0.618),
-        '70': calc_level(0.7),
-        '78.6': calc_level(0.786),
-        '90': calc_level(0.9),
-        '100': calc_level(1.0)
+        '0': low,
+        '23.6': low + (diff * 0.236),
+        '38.2': low + (diff * 0.382),
+        '50': low + (diff * 0.5),
+        '61.8': low + (diff * 0.618),
+        '70': low + (diff * 0.7),
+        '78.6': low + (diff * 0.786),
+        '90': low + (diff * 0.9),
+        '100': high,
+        '150': low + (diff * 1.5)  # Extension
     }
     
-    # OB Zone: %70-90
-    ob_low = min(fib_levels['70'], fib_levels['90'])
-    ob_high = max(fib_levels['70'], fib_levels['90'])
-    
-    # FVG Zone: %70-90
-    fvg_low = min(fib_levels['70'], fib_levels['90'])
-    fvg_high = max(fib_levels['70'], fib_levels['90'])
-    
     return {
-        'fib_0': fib_0,
-        'fib_100': fib_100,
-        'ob_zone': (ob_low, ob_high),
-        'fvg_zone': (fvg_low, fvg_high),
+        'fib_0': low,
+        'fib_100': high,
+        'ob_zone': ob_zone,
+        'fvg_zone_long': fvg_zone_long,
+        'fvg_zone_short': fvg_zone_short,
         'fib_levels': fib_levels,
         'pdc_high': high,
         'pdc_low': low
@@ -423,19 +448,33 @@ def is_in_ob_zone(price, fibo_data):
     return zone_low <= price <= zone_high
 
 
-def is_in_fvg_zone(price, fibo_data):
+def is_in_fvg_zone(price, fibo_data, direction='LONG'):
     """
-    Fiyatın FVG zone'unda (%70-90) olup olmadığını kontrol et.
+    Fiyatın FVG zone'unda (%100-150 extension) olup olmadığını kontrol et.
+    
+    v2.5.1 GÜNCELLEME:
+    - FVG zone artık PDC DIŞINDA (extension)
+    - LONG: PDC high'dan yukarı (%100-150)
+    - SHORT: PDC low'dan aşağı (%100-150, negatif yönde)
     
     Args:
         price: Kontrol edilecek fiyat (FVG mid-point)
         fibo_data: calculate_fibo_zones() çıktısı
+        direction: 'LONG' veya 'SHORT' (FVG yönü)
     
     Returns:
         bool
     """
-    if not fibo_data or 'fvg_zone' not in fibo_data:
+    if not fibo_data:
         return True  # Fibo yoksa filtre uygulama
     
-    zone_low, zone_high = fibo_data['fvg_zone']
+    if direction == 'LONG':
+        if 'fvg_zone_long' not in fibo_data:
+            return True
+        zone_low, zone_high = fibo_data['fvg_zone_long']
+    else:  # SHORT
+        if 'fvg_zone_short' not in fibo_data:
+            return True
+        zone_low, zone_high = fibo_data['fvg_zone_short']
+    
     return zone_low <= price <= zone_high

@@ -1,6 +1,21 @@
 # T-TARS Changelog
 
-## v2.5.0 (2024-12-29)
+## v2.5.1 (2025-12-30)
+
+### 🔄 Changed
+- **FVG Zone**: %70-90 → %50-150 (PDC içi + dışı)
+- **Fibo Hesaplama**: Bias-aware (yöne göre ters çekilir)
+  - LONG (Yeşil PDC): Fibo 0=Low, 100=High, extension yukarı
+  - SHORT (Kırmızı PDC): Fibo 0=High, 100=Low, extension aşağı
+- **is_in_fvg_zone()**: direction parametresi eklendi
+
+### 📁 Güncellenen Dosyalar
+- `calculators.py` - FVG_ZONE_MIN=0.50, FVG_ZONE_MAX=1.50, bias-aware hesaplama
+- `setup_detector.py` - Direction bazlı FVG filtreleme
+
+---
+
+## v2.5.0 (2025-12-29)
 
 ### Yeni Özellikler
 - **SYSTEM_PROMPT:** Claude artık kim olduğunu biliyor (T-TARS, ICT/SMC trader)
@@ -19,9 +34,11 @@
 - User prompt'tan rol tanımı çıkarıldı (artık sistem prompt'ta)
 - Max tokens: 256 → 16000 (thinking için)
 
+### Değişenler
+- Calculators.py içerisindeki hesaplama katsayıları güncellendi
 ---
 
-## v2.4.13 (2024-12-29)
+## v2.4.13 (2025-12-29)
 
 ### Değişiklikler
 - **REMOVED:** XAUTUSDT auto-scan'den çıkarıldı (yüksek fonlama oranı)

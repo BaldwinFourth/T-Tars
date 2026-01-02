@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.5.2
+T-TARS Bitget Service v2.5.3
 =============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.5.3:
+- NEW: 1h volume fallback - MARKET_CACHE expired ise volume_analyzer'dan oku
+- FIX: 1h volume artık 0.0 dönmüyor (2 saat 10 dk buffer)
 
 v2.5.2:
 - FIX: VOLUME_STRENGTH_HIGH/MEDIUM → VOLUME_GOOD/MEDIUM (DRY fix)
@@ -741,10 +745,30 @@ class BitgetService:
                             'source': 'tradingview_binance', 'cache_age': cache_age
                         }
                     else:
-                        volume_data[api_tf] = {
-                            'spike': False, 'spike_ratio': 0.0, 'strength': 'low',
-                            'trend': 'unknown', 'source': 'no_cache'
-                        }
+                        # v2.5.3: Fallback - volume_analyzer'dan oku (2 saat 10 dk TTL)
+                        from app.strategies.volume_analyzer import get_volume
+                        vol_backup = get_volume(cache_pair, api_tf)
+                        spike_ratio = vol_backup.get('spike', 0)
+                        
+                        if spike_ratio > 0:
+                            spike = spike_ratio >= VOLUME_SPIKE_FLAG
+                            if spike_ratio >= VOLUME_GOOD:
+                                strength = 'high'
+                            elif spike_ratio >= VOLUME_MEDIUM:
+                                strength = 'medium'
+                            else:
+                                strength = 'low'
+                            volume_data[api_tf] = {
+                                'spike': spike, 'spike_ratio': round(spike_ratio, 4),
+                                'strength': strength, 'trend': 'unknown',
+                                'source': 'volume_store_fallback'
+                            }
+                            logger.debug(f"📊 {cache_pair} {api_tf}: Fallback volume = {spike_ratio:.2f}x")
+                        else:
+                            volume_data[api_tf] = {
+                                'spike': False, 'spike_ratio': 0.0, 'strength': 'low',
+                                'trend': 'unknown', 'source': 'no_data'
+                            }
                     
                     tf_atr = atr_data.get(api_tf, 0)
                     order_blocks[api_tf] = scan_order_blocks(ohlcv, api_tf, atr=tf_atr, current_price=current_price)

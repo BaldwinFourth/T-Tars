@@ -1,4 +1,27 @@
-# T-TARS Changelog 
+# T-TARS CHANGELOG
+
+## v2.5.3 (2026-01-02)
+
+### 🐛 Bug Fixes
+- **1h Volume Fix:** MARKET_CACHE 20dk sonra expire olunca 1h volume 0.0 dönüyordu
+  - Artık volume_analyzer'a fallback yapılıyor (2 saat 10 dk TTL)
+  - 1h webhook saat başı geliyor, buffer yeterli
+
+### 📁 Değişen Dosyalar
+- `volume_analyzer.py` - TTL: 2 saat → 2 saat 10 dakika
+- `bitget_service.py` - Cache miss olunca volume_analyzer fallback
+
+### 🔧 Teknik Detay
+```
+MARKET_CACHE expired?
+    │
+    ├── YES → volume_analyzer.get_volume() çağır
+    │         ├── Veri var? → Kullan ✅
+    │         └── Veri yok? → 0.0 döndür
+    │
+    └── NO → MARKET_CACHE'den oku ✅
+```
+---
 
 ## v2.5.2 - (2026-01-02)
 
@@ -30,7 +53,6 @@
 4. `CHANGELOG.md` - Bu dosya
 
 ---
-# T-TARS - CHANGELOG
 
 ## v2.5.1 (2025-12-30)
 

@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Volume Analyzer v2.3.11
+T-TARS Volume Analyzer v2.5.3
 ==============================
 Volume spike detection ve analiz
+
+v2.5.3:
+- CHANGED: VOLUME_EXPIRY_SECONDS = 7800 (2 saat 10 dakika)
+  - 1h webhook saat başı geliyor, 2 saatlik buffer + 10 dk güvenlik payı
 
 v2.3.11:
 - FIX: get_volume_strength() default 'medium' → 'low' (güvenli varsayılan)
@@ -19,7 +23,8 @@ from app.strategies.calculators import VOLUME_TRADEABLE_MIN
 
 logger = logging.getLogger(__name__)
 
-VOLUME_EXPIRY_SECONDS = 2 * 60 * 60
+# v2.5.3: 2 saat 10 dakika (1h webhook için yeterli buffer)
+VOLUME_EXPIRY_SECONDS = 2 * 60 * 60 + 10 * 60  # 7800 saniye
 
 _VOLUME_STORE = {}
 

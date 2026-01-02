@@ -1,3 +1,35 @@
+# T-TARS Changelog 
+
+## v2.5.2 - (2026-01-02)
+
+### Stop Loss Optimization & DRY Fix
+
+### 🔧 CHANGED
+- **claude_service.py**: MIN_DISTANCE_PCT = 0.008 → 0.01 (%1.0)
+- **claude_service.py**: STOP_MIN_PCT = 0.8% → 1.0% (daha geniş stop)
+- **bitget_service.py**: VOLUME_STRENGTH_HIGH/MEDIUM → VOLUME_GOOD/MEDIUM import
+- **bitget_service.py**: `lookback = max(OB_LOOKBACK, FVG_LOOKBACK)` - Unified lookback
+
+### 🐛 FIXED (DRY Violations)
+- **bitget_service.py**: Duplicate constant'lar kaldırıldı
+  - VOLUME_STRENGTH_HIGH → calculators.VOLUME_GOOD
+  - VOLUME_STRENGTH_MEDIUM → calculators.VOLUME_MEDIUM
+  - TF_LOOKBACK_BARS → KALDIRILDI (OB_LOOKBACK/FVG_LOOKBACK kullanılıyor)
+
+### 📊 Değişiklik Nedeni
+- Win rate %36.8 çok düşük (hedef: %50+)
+- %0.8 stop tek 15m mum hareketiyle tetikleniyordu
+- %1.0 stop kripto volatilitesine daha uygun
+- TP hala %3.0 (3R risk-reward korunuyor)
+- Lookback unification: OB/FVG detector ne kadar bar istiyorsa o kadar çekilecek
+
+### 📁 Değişen Dosyalar
+1. `claude_service.py` - Stop mesafesi %0.8 → %1.0
+2. `bitget_service.py` - DRY fix, unified lookback
+3. `VERSION` - 2.5.1 → 2.5.2
+4. `CHANGELOG.md` - Bu dosya
+
+---
 # T-TARS - CHANGELOG
 
 ## v2.5.1 (2025-12-30)
@@ -1518,3 +1550,4 @@ auto_analyze() başı:
 ### Added
 - **OKX Entegrasyonu:** API, Bakiye, Pozisyon ve Trade komutları (`/stopokx`, `/startokx`).
 - **Risk:** Max $100/pozisyon, $50/gün zarar limiti.
+

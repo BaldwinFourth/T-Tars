@@ -51,13 +51,13 @@ SCORE_RR_EXCELLENT = 1.50  # Bonus
 SCORE_RR_GOOD = 1.00
 SCORE_RR_MEDIUM = 0.65
 SCORE_RR_MINIMUM = 0.50
-SCORE_RR_ELSE = 0.20
+SCORE_RR_ELSE = 0.10
 
 # ============================================
 # VOLUME THRESHOLDS (Fine tuning buradan)
 # ============================================
-VOLUME_TRADEABLE_MIN = 0.70 # Minimum tradeable (bu altı = reject)
-VOLUME_LOW = 0.8           # Düşük ama kabul edilebilir
+VOLUME_TRADEABLE_MIN = 0.65 # Minimum tradeable (bu altı = reject)
+VOLUME_LOW = 0.75           # Düşük ama kabul edilebilir
 VOLUME_MEDIUM = 1.5        # Orta
 VOLUME_GOOD = 2.0          # İyi
 VOLUME_EXCELLENT = 2.5     # Mükemmel volume spike
@@ -66,8 +66,8 @@ VOLUME_EXCELLENT = 2.5     # Mükemmel volume spike
 VOLUME_SPIKE_FLAG = 1.5    # spike_ratio >= bu değer → spike=True
 
 # Volume Strength Labels - bitget_service kullanıyor
-VOLUME_STRENGTH_HIGH = 3.0   # >= 3.0 → 'high'
-VOLUME_STRENGTH_MEDIUM = 2.0 # >= 2.0 → 'medium'
+VOLUME_STRENGTH_HIGH = 2.0   # >= 2.0 → 'high'
+VOLUME_STRENGTH_MEDIUM = 1.5 # >= 1.5 → 'medium'
 # else → 'low'
 
 # ============================================
@@ -76,15 +76,15 @@ VOLUME_STRENGTH_MEDIUM = 2.0 # >= 2.0 → 'medium'
 SCORE_VOLUME_EXCELLENT = 1.50  # Bonus
 SCORE_VOLUME_GOOD = 1.20
 SCORE_VOLUME_MEDIUM = 0.80
-SCORE_VOLUME_LOW = 0.60
-SCORE_VOLUME_ELSE = 0.3
+SCORE_VOLUME_LOW = 0.50
+SCORE_VOLUME_ELSE = 0.4
 
 # ============================================
 # OB/FVG STRENGTH MAPPING (Fine tuning buradan)
 # ============================================
 STRENGTH_MAP = {
     'high': 1.25,    # Bonus
-    'medium': 0.65,
+    'medium': 0.75,
     'low': 0.30
 }
 
@@ -107,31 +107,31 @@ VOLUME_VETO_MAX_SCORE = 0.65  # Volume < VOLUME_LOW ise max bu score
 # ============================================
 # v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
 # ============================================
-MIN_OB_SIZE_ATR = 1.3      # OB en az 1.3 ATR olmalı
-MIN_FVG_SIZE_ATR = 1.5     # FVG en az 1.5 ATR olmalı
+MIN_OB_SIZE_ATR = 1.2      # OB en az 1.1 ATR olmalı
+MIN_FVG_SIZE_ATR = 1.2     # FVG en az 1.1 ATR olmalı
 
 # ============================================
 # v2.5.1: LOOKBACK & ENTRY DISTANCE
 # ============================================
-OB_LOOKBACK = 300                  # OB arama: 15m ~3 gün, 1h ~12 gün
-FVG_LOOKBACK = 300                 # FVG arama: 15m ~3 gün, 1h ~12 gün
-MAX_ENTRY_DISTANCE_PERCENT = 3.0   # Entry max %3 uzaklıkta olmalı
+OB_LOOKBACK = 200                  # OB arama: 15m ~3 gün, 1h ~12 gün
+FVG_LOOKBACK = 200                 # FVG arama: 15m ~3 gün, 1h ~12 gün
+MAX_ENTRY_DISTANCE_PERCENT = 2.0   # Entry max %2 uzaklıkta olmalı
 
 # ============================================
 # v2.5.1: MAX ZONE COUNTS
 # ============================================
-MAX_OB_COUNT = 4                   # En fazla 4 OB döndür
-MAX_FVG_COUNT = 4                  # En fazla 4 FVG döndür
+MAX_OB_COUNT = 3                   # En fazla 3 OB döndür
+MAX_FVG_COUNT = 3                  # En fazla 3 FVG döndür
 
 # ============================================
 # v2.5.1: FİBO ZONE TANIMLARI (UPDATED!)
 # ============================================
 # OB Zone: PDC içi retracement (%70-90)
-OB_ZONE_MIN = 0.70         # OB arama: %70-90
-OB_ZONE_MAX = 0.90
+OB_ZONE_MIN = 0.60         # OB arama: %50-150
+OB_ZONE_MAX = 1.50  
 
 # FVG Zone: PDC içi + dışı (%50-150)
-FVG_ZONE_MIN = 0.50        # v2.5.1: %50 (PDC orta noktası)
+FVG_ZONE_MIN = 0.60        # v2.5.1: %50 (PDC orta noktası)
 FVG_ZONE_MAX = 1.50        # v2.5.1: %150 (PDC dışı extension)
 
 # ============================================

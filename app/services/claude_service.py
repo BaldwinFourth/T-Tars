@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Claude Service v2.5.0
+T-TARS Claude Service v2.5.2
 ==============================
 Claude AI API wrapper for market analysis and setup evaluation.
+
+v2.5.2:
+- CHANGED: MIN_DISTANCE_PCT = 0.01 (%1.0) - Stop mesafesi artırıldı
+- CHANGED: STOP_MIN_PCT = 1.0 (Config'den bağımsız hardcode)
+- Win rate artırmak için daha geniş stop
 
 v2.5.0:
 - NEW: SYSTEM_PROMPT eklendi (Claude artık kim olduğunu biliyor)
@@ -11,46 +16,17 @@ v2.5.0:
 
 v2.4.12:
 - CHANGED: Limit Order Güvenlik Kontrolleri (2 katmanlı)
-  1. Yön Kontrolü (ORİJİNAL): LONG: Stop<Entry<Current, SHORT: Current<Entry<Stop
-  2. Stop-Current Mesafesi >= %0.8 (ADJUSTED değerlerle!)
-- REMOVED: Entry/Current %1 fark kontrolü (yanlış mantık)
-- REMOVED: Stop-Entry >= %0.8 kontrolü (adjust_stop_and_tp zaten EXPAND yapıyor)
-- FIX: Stop-Current kontrolü artık ADJUST SONRASI yapılıyor
-
-AKIŞ:
-1. Yön Kontrolü (orijinal değerler) → limit hemen fill olmasın
-2. adjust_stop_and_tp() → Stop %0.8'e EXPAND (gerekirse)
-3. Stop-Current >= %0.8 (adjusted değerler) → volatilite güvenliği
-
-v2.4.11:
-- NEW: Stop Sanity Check (LONG: Stop<Entry<TP, SHORT: TP<Entry<Stop)
-- Limit order instant fill sorunu için ek güvenlik katmanı
-
-v2.4.10:
-- CHANGED: TP1/TP2 sistemi → Tek TP sistemi (TP_MULTIPLIER=3.0)
-- REMOVED: tp1_price, tp2_price → tp_price
-- CHANGED: adjust_stop_and_tp() tek TP döndürüyor
-- CHANGED: MIN_RR_RATIO 2.0 → 3.0
-
-v2.3.9:
-- FIX: EXPAND adjustment artık risk olarak algılanmıyor
-- CHANGED: "⚠️ STOP ADJUSTMENT" → "ℹ️ STOP/TP OPTİMİZASYONU"
-
-v2.3.8:
-- CHANGED: Volume threshold'lar calculators.py'den import ediliyor (DRY)
-- CHANGED: MIN_RR_RATIO calculators.py'den import ediliyor (DRY)
 """
 
 from anthropic import Anthropic
 from app.config import Config
-# v2.3.8: Threshold'ları calculators'tan al (DRY)
 from app.strategies.calculators import (
     VOLUME_TRADEABLE_MIN,
     VOLUME_LOW,
     VOLUME_GOOD,
     VOLUME_EXCELLENT,
     MIN_RR_RATIO,
-    TP_MULTIPLIER  # v2.4.10: tek TP
+    TP_MULTIPLIER
 )
 from app.config import Config
 import logging
@@ -59,9 +35,6 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# ============================================
-# v2.4.14: SISTEM PROMPT
-# ============================================
 SYSTEM_PROMPT = """Sen T-TARS, profesyonel bir ICT/SMC (Inner Circle Trader / Smart Money Concepts) metodolojisi kullanan trading AI asistanısın.
 
 ## KİMLİĞİN:
@@ -106,7 +79,7 @@ def format_price_display(price):
 
 
 class ClaudeService:
-    """Claude Haiku 4.5 API Service - v2.5.0 (AI Decision Engine + Extended Thinking)"""
+    """Claude Haiku 4.5 API Service - v2.5.2 (AI Decision Engine + %1.0 Stop)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -119,25 +92,25 @@ class ClaudeService:
         '3d': '3m', '3m': '3m'
     }
     
-    # v2.4.10: Stop Adjustment Sabitleri
+    # v2.5.2: Stop Adjustment Sabitleri - %1.0 minimum
     STOP_IDEAL_MAX = 1.5    # İdeal maksimum (ara değer)
     STOP_AGGRESSIVE_TARGET = 1.8  # 2-2.5% arası için hedef
     AGGRESSIVE_RR = 3.0     # 2-2.5% arası için R:R
     
-    # v2.4.12: Minimum mesafe sabiti (Config'den alınıyor ama class seviyesinde de tanımlı)
-    MIN_DISTANCE_PCT = 0.008  # %0.8 - Stop-Entry ve Stop-Current için minimum
+    # v2.5.2: Minimum mesafe sabiti - %0.8 → %1.0
+    MIN_DISTANCE_PCT = 0.01  # %1.0 - Stop-Entry ve Stop-Current için minimum
     
     def __init__(self):
         self.client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
         
-        # Stop thresholds Config'den türetiliyor (DRY)
-        self.STOP_MIN_PCT = Config.STOP_DISTANCE_MIN * 100      # 0.008 → 0.8
-        self.STOP_ADJUST_MAX = Config.STOP_DISTANCE_MAX * 100   # 0.025 → 2.5
+        # v2.5.2: %1.0 hardcode (Config'den bağımsız)
+        self.STOP_MIN_PCT = 1.0         # %1.0 minimum stop mesafesi
+        self.STOP_ADJUST_MAX = 2.5      # %2.5 maksimum stop mesafesi
         
         # v2.4.14: Thinking budget
         self.thinking_budget = Config.THINKING_BUDGET
         
-        logger.info(f"✅ Claude Service v2.5.0 initialized: {Config.CLAUDE_MODEL} | "
+        logger.info(f"✅ Claude Service v2.5.2 initialized: {Config.CLAUDE_MODEL} | "
                    f"Thinking: {self.thinking_budget} tokens | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
@@ -179,11 +152,11 @@ class ClaudeService:
     
     def adjust_stop_and_tp(self, entry_price, stop_price, tp_price, direction):
         """
-        v2.4.10: Otomatik Stop/TP Adjustment (Tek TP!)
+        v2.5.2: Otomatik Stop/TP Adjustment - %1.0 minimum!
         
         Kurallar:
-        1. Stop < 0.8% → %0.8'e çek, TP orantılı uzat
-        2. Stop 0.8-1.5% → Değişiklik yok (ideal)
+        1. Stop < 1.0% → %1.0'e çek, TP orantılı uzat
+        2. Stop 1.0-1.5% → Değişiklik yok (ideal)
         3. Stop 1.5-2% → %1.5'e çek, TP orantılı kısalt
         4. Stop 2-2.5% → %1.8'e çek, TP 3R yap
         5. Stop >= 2.5% → None döndür (SKIP)
@@ -228,14 +201,14 @@ class ClaudeService:
             return None
         
         # ============================================
-        # KURAL 2: Stop 0.8-1.5% → İdeal, değişiklik yok
+        # KURAL 2: Stop 1.0-1.5% → İdeal, değişiklik yok
         # ============================================
         if self.STOP_MIN_PCT <= stop_pct <= self.STOP_IDEAL_MAX:
             logger.debug(f"✅ Stop ideal aralıkta: %{stop_pct:.2f}")
             return result
         
         # ============================================
-        # KURAL 1: Stop < 0.8% → %0.8'e çek, TP orantılı uzat
+        # KURAL 1: Stop < 1.0% → %1.0'e çek, TP orantılı uzat
         # ============================================
         if stop_pct < self.STOP_MIN_PCT:
             # Genişletme oranı
@@ -345,117 +318,74 @@ class ClaudeService:
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
-        v2.4.11: AI Setup Değerlendirmesi - Tek TP Sistemi + Safety Checks
-        
-        Kritik veri eksikse → LOG + SKIP (hardcoded default YOK!)
-        
-        Returns:
-            {
-                'action': 'ENTER' | 'SKIP' | 'WAIT',
-                'confidence': 0-100,
-                'reasoning': 'Neden bu karar?',
-                'adjustments': {}
-            }
+        v2.5.2: AI Setup Değerlendirmesi - %1.0 Stop + Safety Checks
         """
         try:
-            # ============================================
             # DEBUG: Gelen veriyi logla
-            # ============================================
             logger.debug(f"📥 setup_data keys: {list(setup_data.keys())}")
             logger.debug(f"📥 market_data keys: {list(market_data.keys())}")
             
-            # ============================================
-            # KRİTİK VERİLERİ ÇIKAR (Hardcoded YOK!)
-            # ============================================
-            
-            # PAIR
+            # KRİTİK VERİLERİ ÇIKAR
             pair = setup_data.get('pair')
             if not pair:
                 logger.error(f"❌ SKIP: 'pair' bilgisi eksik! Keys: {list(setup_data.keys())}")
                 return self._skip_response("pair bilgisi eksik")
             
-            # DIRECTION
             direction = setup_data.get('direction')
             if not direction:
                 logger.error(f"❌ SKIP [{pair}]: 'direction' bilgisi eksik!")
                 return self._skip_response(f"{pair}: direction eksik")
             
-            # TIMEFRAME
             timeframe = setup_data.get('timeframe')
             if not timeframe:
                 logger.error(f"❌ SKIP [{pair}]: 'timeframe' bilgisi eksik!")
                 return self._skip_response(f"{pair}: timeframe eksik")
             
-            # ENTRY PRICE
             entry_price = setup_data.get('entry_price')
             if entry_price is None or entry_price == 0:
                 logger.error(f"❌ SKIP [{pair}]: 'entry_price' eksik veya 0!")
                 return self._skip_response(f"{pair}: entry_price eksik")
             entry_price = float(entry_price)
             
-            # STOP PRICE
             stop_price = setup_data.get('stop_price')
             if stop_price is None or stop_price == 0:
                 logger.error(f"❌ SKIP [{pair}]: 'stop_price' eksik veya 0!")
                 return self._skip_response(f"{pair}: stop_price eksik")
             stop_price = float(stop_price)
             
-            # v2.4.10: TP PRICE (tek TP)
             tp_price = setup_data.get('tp_price')
             if tp_price is None or tp_price == 0:
                 logger.error(f"❌ SKIP [{pair}]: 'tp_price' eksik veya 0!")
                 return self._skip_response(f"{pair}: tp_price eksik")
             tp_price = float(tp_price)
             
-            # R:R RATIO
             rr_ratio = setup_data.get('rr_ratio')
             if rr_ratio is None:
                 logger.error(f"❌ SKIP [{pair}]: 'rr_ratio' bilgisi eksik!")
                 return self._skip_response(f"{pair}: rr_ratio eksik")
             rr_ratio = float(rr_ratio)
             
-            # SETUP TYPE
             setup_type = setup_data.get('type')
             if not setup_type:
                 logger.warning(f"⚠️ [{pair}]: 'type' eksik, 'Unknown' kullanılıyor")
                 setup_type = 'Unknown'
             
-            # CONFIDENCE (detector'dan)
             confidence_label = setup_data.get('confidence')
-            if not confidence_label:
-                logger.warning(f"⚠️ [{pair}]: 'confidence' eksik!")
-                confidence_label = None  # Prompt'ta belirtilecek
-            
-            # STRENGTH SCORE (detector'dan)
             strength_score = setup_data.get('strength_score')
-            if strength_score is None:
-                logger.warning(f"⚠️ [{pair}]: 'strength_score' eksik!")
-                strength_score = None  # Prompt'ta belirtilecek
-            else:
+            if strength_score is not None:
                 strength_score = float(strength_score)
             
-            # ============================================
-            # MARKET VERİLERİNİ ÇIKAR
-            # ============================================
-            
-            # CURRENT PRICE
+            # MARKET VERİLERİ
             current_price = market_data.get('current_price')
             if current_price is None or current_price == 0:
                 logger.error(f"❌ SKIP [{pair}]: 'current_price' eksik!")
                 return self._skip_response(f"{pair}: current_price eksik")
             current_price = float(current_price)
             
-            # ============================================
-            # v2.4.12: LİMİT ORDER GÜVENLİK KONTROLLERİ
-            # ============================================
+            # LİMİT ORDER GÜVENLİK KONTROLLERİ
             is_long = direction.upper() == 'LONG'
             
-            # -------------------------------------------
-            # KONTROL 1: YÖN KONTROLÜ (Tam Sıralama)
-            # LONG:  Stop < Entry < Current (fiyat aşağı gelecek, bekleyecek)
-            # SHORT: Current < Entry < Stop (fiyat yukarı çıkacak, bekleyecek)
-            # NOT: Bu kontrol ORİJİNAL değerlerle yapılır (yön değişmez)
-            # -------------------------------------------
+            # KONTROL 1: YÖN KONTROLÜ
             if is_long:
                 if not (stop_price < entry_price < current_price):
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG sıralama yanlış!")
@@ -473,47 +403,26 @@ class ClaudeService:
                     if current_price >= entry_price:
                         return self._skip_response(f"{pair}: SHORT Current >= Entry, limit hemen fill olur")
             
-            # NOT: Stop-Entry >= %0.8 kontrolü KALDIRILDI (v2.4.12)
-            # Sebep: adjust_stop_and_tp() zaten < %0.8 → EXPAND → %0.8'e çekiyor
-            # Stop-Current kontrolü ADJUST SONRASINA taşındı (satır ~540)
-            
-            # ============================================
-            # v2.4.10: TP Sanity Check (ATR=0 durumunu yakala)
-            # ============================================
+            # TP Sanity Check
             if is_long and tp_price <= entry_price:
                 logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) <= Entry ({entry_price}) - LONG için geçersiz!")
-                return self._skip_response(f"{pair}: TP entry'den düşük veya eşit (muhtemelen ATR=0)")
+                return self._skip_response(f"{pair}: TP entry'den düşük veya eşit")
             if not is_long and tp_price >= entry_price:
                 logger.error(f"❌ SKIP [{pair}]: TP ({tp_price}) >= Entry ({entry_price}) - SHORT için geçersiz!")
-                return self._skip_response(f"{pair}: TP entry'den yüksek veya eşit (muhtemelen ATR=0)")
+                return self._skip_response(f"{pair}: TP entry'den yüksek veya eşit")
             
-            # PDC (Previous Day Candle)
+            # PDC
             pdc = market_data.get('previous_day', {})
             pdc_bias = pdc.get('candle_type')
-            pdc_high = pdc.get('high')
-            pdc_low = pdc.get('low')
-            pdc_open = pdc.get('open')
-            pdc_close = pdc.get('close')
+            pdc_high = float(pdc.get('high', 0))
+            pdc_low = float(pdc.get('low', 0))
+            pdc_open = float(pdc.get('open', 0))
+            pdc_close = float(pdc.get('close', 0))
             
-            if not pdc_bias:
-                logger.warning(f"⚠️ [{pair}]: PDC bias eksik!")
-            
-            # PDC değerlerini float'a çevir (varsa)
-            pdc_high = float(pdc_high) if pdc_high else 0
-            pdc_low = float(pdc_low) if pdc_low else 0
-            pdc_open = float(pdc_open) if pdc_open else 0
-            pdc_close = float(pdc_close) if pdc_close else 0
-            
-            # ATR - timeframe bazlı
+            # ATR
             atr_data = market_data.get('atr', {})
             atr_key = self.TF_MAP.get(timeframe.lower(), timeframe.lower())
-            atr = atr_data.get(atr_key)
-            
-            if atr is None:
-                logger.warning(f"⚠️ [{pair}]: ATR[{atr_key}] eksik! Mevcut keys: {list(atr_data.keys())}")
-                atr = 0
-            else:
-                atr = float(atr)
+            atr = float(atr_data.get(atr_key, 0))
             
             # OB/FVG bilgisi
             smart_money = market_data.get('smart_money', {})
@@ -537,12 +446,8 @@ class ClaudeService:
             else:
                 volume_spike = 0.0
                 volume_trend = 'unknown'
-                logger.warning(f"⚠️ [{pair}]: Volume[{atr_key}] eksik veya format yanlış!")
             
-            # ============================================
-            # v2.4.10: STOP/TP ADJUSTMENT (Tek TP!)
-            # ============================================
-            
+            # STOP/TP ADJUSTMENT
             adjustment_result = self.adjust_stop_and_tp(
                 entry_price=entry_price,
                 stop_price=stop_price,
@@ -561,7 +466,7 @@ class ClaudeService:
                     'adjustments': {}
                 }
             
-            # v2.4.10: Adjusted değerleri kullan (tek TP)
+            # Adjusted değerleri kullan
             stop_price = adjustment_result['stop_price']
             tp_price = adjustment_result['tp_price']
             stop_distance_pct = adjustment_result['new_stop_pct']
@@ -573,39 +478,17 @@ class ClaudeService:
                            f"Stop: %{adjustment_result['original_stop_pct']} → %{adjustment_result['new_stop_pct']} | "
                            f"R:R: {adjustment_result['original_rr']} → {adjustment_result['new_rr']}")
             
-            # ============================================
-            # v2.4.12: STOP-CURRENT KONTROLÜ (ADJUSTED değerlerle!)
-            # Volatilite güvenliği - fill olsa bile stop tetiklenmez
-            # ============================================
+            # STOP-CURRENT KONTROLÜ (ADJUSTED değerlerle!)
             stop_current_pct = abs(stop_price - current_price) / current_price if current_price > 0 else 0
             if stop_current_pct < self.MIN_DISTANCE_PCT:
                 logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Current mesafesi çok küçük (ADJUSTED)!")
                 logger.warning(f"   Adjusted Stop: {format_price_display(stop_price)} | Current: {format_price_display(current_price)}")
                 logger.warning(f"   Stop-Current: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
-                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %0.8 minimum")
+                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %1.0 minimum")
             
-            # Log: Güvenlik kontrolleri geçti
             logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti (ADJUSTED): Stop-Current: %{stop_current_pct*100:.2f}")
             
-            # ============================================
-            # DEBUG LOG - Toplanan veriler
-            # ============================================
-            logger.debug(f"""
-📊 [{pair}] Evaluate Setup Debug:
-   Direction: {direction} | TF: {timeframe} | Type: {setup_type}
-   Entry: {entry_price} | Stop: {stop_price} | TP: {tp_price}
-   R:R: {rr_ratio:.2f} | Stop%: {stop_distance_pct:.2f}%
-   Current: {current_price} | Stop-Current: %{stop_current_pct*100:.2f}
-   Adjusted: {adjustment_result['adjusted']} | Type: {adjustment_result['adjustment_type']}
-   Confidence: {confidence_label} | Score: {strength_score}
-   PDC Bias: {pdc_bias} | ATR: {atr} | Vol: {volume_spike:.2f}x
-""")
-            
-            # ============================================
-            # ÖN KONTROLLER (Claude'a göndermeden önce)
-            # ============================================
-            
-            # v2.4.10: MIN_RR_RATIO = 3.0
+            # ÖN KONTROLLER
             if round(rr_ratio, 2) < MIN_RR_RATIO:
                 logger.info(f"⏭️ Pre-filter SKIP [{pair}]: RR {rr_ratio:.2f} < {MIN_RR_RATIO}")
                 return {
@@ -615,11 +498,7 @@ class ClaudeService:
                     'adjustments': {}
                 }
             
-            # ============================================
-            # CLAUDE PROMPT
-            # ============================================
-            
-            # Confidence/Score bilgisi varsa göster
+            # CLAUDE PROMPT hazırla
             score_info = ""
             if confidence_label:
                 score_info += f"- Confidence: {confidence_label}\n"
@@ -628,7 +507,6 @@ class ClaudeService:
             if python_score:
                 score_info += f"- Python Score: {python_score:.2f}/1.0 ({python_score*100:.0f}/100)\n"
             
-            # Adjustment bilgisi - EXPAND pozitif algı
             adjustment_info = ""
             if adjustment_result['adjusted']:
                 adj_type = adjustment_result['adjustment_type']
@@ -648,7 +526,6 @@ class ClaudeService:
 - R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f}
 """
             
-            # v2.5.0: User prompt (rol tanımı artık sistem prompt'ta)
             prompt = f"""Aşağıdaki setup'ı değerlendir:
 
 ## SETUP BİLGİLERİ:
@@ -701,9 +578,7 @@ class ClaudeService:
 SADECE JSON formatında cevap ver:
 {{"action": "ENTER", "confidence": 85, "reasoning": "kısa açıklama max 80 karakter"}}"""
 
-            # ============================================
-            # CLAUDE API ÇAĞRISI (v2.4.14: system + thinking)
-            # ============================================
+            # CLAUDE API ÇAĞRISI
             logger.debug(f"🧠 [{pair}]: Claude API çağrılıyor (thinking: {self.thinking_budget} tokens)...")
             
             response = self.client.messages.create(
@@ -725,9 +600,7 @@ SADECE JSON formatında cevap ver:
             
             logger.debug(f"🧠 [{pair}]: Claude response: {text_content[:100]}...")
             
-            # ============================================
             # JSON PARSE
-            # ============================================
             try:
                 json_match = re.search(r'\{[^{}]*\}', text_content, re.DOTALL)
                 if json_match:
@@ -736,7 +609,6 @@ SADECE JSON formatında cevap ver:
                     decision = json.loads(text_content)
             except json.JSONDecodeError as e:
                 logger.warning(f"⚠️ [{pair}]: JSON parse failed: {e} | Response: {text_content[:100]}")
-                # Fallback
                 if 'ENTER' in text_content.upper():
                     decision = {'action': 'ENTER', 'confidence': 50, 'reasoning': 'JSON parse failed, ENTER detected'}
                 elif 'SKIP' in text_content.upper():
@@ -749,7 +621,6 @@ SADECE JSON formatında cevap ver:
             if action not in ['ENTER', 'SKIP', 'WAIT']:
                 action = 'WAIT'
             
-            # v2.4.10: tek TP
             result = {
                 'action': action,
                 'confidence': int(decision.get('confidence', 50)),

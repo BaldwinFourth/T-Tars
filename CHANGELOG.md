@@ -1,5 +1,28 @@
 # T-TARS Changelog
 
+## v2.5.6 (2025-01-07)
+
+### 🐛 Critical Bug Fixes
+- **FIX**: Pre-filter mantığı Claude service v2.5.2'den birebir alındı
+- **FIX**: SHORT yön kontrolü operatör hatası düzeltildi
+  - YANLIŞ: `entry_price <= stop_price` → SKIP (tüm SHORT'ları skip ediyordu!)
+  - DOĞRU: `entry_price >= stop_price` → SKIP
+- **FIX**: Duplicate kontrol blokları kaldırıldı (tek blok, Claude gibi)
+
+### 📝 Terminology
+- Log mesajlarında "Current" → "Price" değiştirildi (kullanıcı terminolojisi)
+
+### 🔄 Pre-filter Mantığı (Claude v2.5.2 ile birebir)
+```
+LONG:  stop < entry < price  (stop altında, entry ortada, price üstte)
+SHORT: price < entry < stop  (price altta, entry ortada, stop üstte)
+```
+
+### 📋 Çıkarılan Ders (Memory'e kaydedildi)
+API geçişinde (Claude→Grok) sadece API çağrısını değiştir, iş mantığına DOKUNMA!
+
+---
+
 ## v2.5.5 (2025-01-07)
 
 ### 🐛 Bug Fixes

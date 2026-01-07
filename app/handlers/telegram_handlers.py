@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.4.11
+T-TARS Telegram Handlers v2.5.4
 =================================
 Telegram bot komut handler'ları.
+
+v2.5.4:
+- CHANGED: _claude → _grok (global değişken)
+- CHANGED: Claude AI referansları → Grok AI
+- CHANGED: Status mesajlarında AI engine güncellendi
 
 v2.4.11:
 - NEW: /score'da En Kötü/En İyi coin gösterimi
@@ -59,26 +64,27 @@ def format_price(price):
 # --------------------------
 _telegram = None
 _exchange = None
-_claude = None
+_grok = None  # v2.5.4: _claude → _grok
 _storage = None
 _tracking = None
 _trading_enabled = True
 _market_cache = None  # v2.4.4: Market cache referansı
 
 
-def init_handlers(telegram, exchange, claude, storage, tracking, market_cache=None):
+def init_handlers(telegram, exchange, grok, storage, tracking, market_cache=None):
     """
+    v2.5.4: claude parametre → grok
     v2.4.4: market_cache parametresi eklendi
     """
-    global _telegram, _exchange, _claude, _storage, _tracking, _trading_enabled, _market_cache
+    global _telegram, _exchange, _grok, _storage, _tracking, _trading_enabled, _market_cache
     _telegram = telegram
     _exchange = exchange
-    _claude = claude
+    _grok = grok  # v2.5.4: _claude → _grok
     _storage = storage
     _tracking = tracking
     _market_cache = market_cache  # v2.4.4
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.4.4) - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
+    logger.info(f"✅ Telegram handlers initialized (v2.5.4) - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
 
 
 # --------------------------
@@ -270,7 +276,7 @@ def handle_execute_command(text, chat_id):
             ticker = parts[1] if len(parts) > 1 else "BTCUSDT"
             template = _storage.get_execute_template()
             prompt = f"Sen T-TARS. {ticker} için Execute şablonunu doldur.\n{template}"
-            result = _claude.analyze(prompt)
+            result = _grok.analyze(prompt)  # v2.5.4: _claude → _grok
             message = f"⚡ *T-TARS EXECUTE - {ticker}*\n\n{result['text']}"
             _telegram.send(message[:4000], chat_id=chat_id)
         except Exception as e:
@@ -285,7 +291,7 @@ def handle_log_command(text, chat_id):
         try:
             template = _storage.get_log_template()
             prompt = f"Sen T-TARS. Trade Log şablonunu doldur.\n{template}"
-            result = _claude.analyze(prompt)
+            result = _grok.analyze(prompt)  # v2.5.4: _claude → _grok
             message = f"📋 *T-TARS TRADE LOG*\n\n{result['text']}"
             _telegram.send(message[:4000], chat_id=chat_id)
         except Exception as e:
@@ -494,7 +500,7 @@ def handle_status_command(chat_id):
                 'telegram': '✅',
                 'bitget_market': '⏳',
                 'bitget_api': '⏳',
-                'claude': '⏳',
+                'grok': '⏳',  # v2.5.4: claude → grok
                 'storage': '⏳'
             }
             
@@ -512,7 +518,8 @@ def handle_status_command(chat_id):
             except:
                 services_status['bitget_api'] = '❌'
             
-            services_status['claude'] = '✅' if Config.ANTHROPIC_API_KEY else '❌'
+            # v2.5.4: XAI_API_KEY kontrolü
+            services_status['grok'] = '✅' if Config.XAI_API_KEY else '❌'
             services_status['storage'] = '✅'
             
             check_time = (time.time() - check_start) * 1000
@@ -530,13 +537,13 @@ def handle_status_command(chat_id):
 • Telegram: {services_status['telegram']}
 • Bitget Market: {services_status['bitget_market']}
 • Bitget API: {services_status['bitget_api']}
-• Claude AI: {services_status['claude']}
+• Grok AI: {services_status['grok']}
 • Storage: {services_status['storage']}
 
 📊 *Sistem*
 • Versiyon: v{Config.VERSION}
 • Exchange: Bitget
-• AI Engine: Claude Haiku 4.5
+• AI Engine: Grok 4.1 Fast Reasoning
 • Trading: {trading_status}
 • {cache_info}
 • Response: {check_time:.0f}ms
@@ -649,7 +656,7 @@ def handle_help_command(chat_id):
 🤖 *T-TARS v{Config.VERSION}*
 ━━━━━━━━━━━━━━━━━━━━━━
 Bitget Futures Trading Bot
-AI Engine: Claude Haiku 4.5
+AI Engine: Grok 4.1 Fast Reasoning
 
 📋 *KOMUTLAR*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -700,7 +707,7 @@ def handle_stopbitget_command(chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 
 • Yeni emir açılmayacak
-• Claude AI değerlendirme duracak
+• Grok AI değerlendirme duracak
 • Mevcut emirler etkilenmez
 
 Tekrar başlatmak için:
@@ -719,7 +726,7 @@ def handle_startbitget_command(chat_id):
 ━━━━━━━━━━━━━━━━━━━━━━
 
 • Otomatik trading başladı
-• Claude AI karar verecek
+• Grok AI karar verecek
 • Setup'lar değerlendirilecek
 
 Durdurmak için:

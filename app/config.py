@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.4.13
+T-TARS Configuration v2.5.3
 ============================
+
+v2.5.3:
+- NEW: XAI_API_KEY - Grok API anahtarı
+- NEW: GROK_MODEL - grok-4-1-fast-reasoning
+- CHANGED: Claude → Grok AI geçişi
+- REMOVED: ANTHROPIC_API_KEY, CLAUDE_MODEL (deprecated)
 
 v2.4.13:
 - REMOVED: XAUTUSDT çıkarıldı (yüksek fonlama oranı)
 - ADDED: LTCUSDT, SUIUSDT, ADAUSDT, AVAXUSDT, HYPEUSDT eklendi
 - Toplam: 14 coin
-
-v2.4.8:
-- REMOVED: BTCUSDT auto-scan'den çıkarıldı
-- ADDED: NIGHTUSDT, BCHUSDT, DOGEUSDT eklendi
-
 """
 
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.4.13"""
+    """T-TARS Configuration v2.5.3"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -54,11 +55,15 @@ class Config:
     DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '20'))
     
     # ============================================
-    # CLAUDE AI
+    # GROK AI (v2.5.3 - Claude yerine)
     # ============================================
-    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-    CLAUDE_MODEL = os.getenv('CLAUDE_MODEL', 'claude-haiku-4-5-20251001')
-    THINKING_BUDGET = int(os.getenv('THINKING_BUDGET', '10000'))
+    XAI_API_KEY = os.getenv('XAI_API_KEY')
+    GROK_MODEL = os.getenv('GROK_MODEL', 'grok-4-1-fast-reasoning')
+    THINKING_BUDGET = int(os.getenv('THINKING_BUDGET', '10000'))  # Grok reasoning için
+    
+    # Backward compatibility (deprecated - artık kullanılmıyor)
+    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')  # Deprecated
+    CLAUDE_MODEL = os.getenv('CLAUDE_MODEL', 'claude-haiku-4-5-20251001')  # Deprecated
     
     # ============================================
     # CLOUD STORAGE
@@ -131,7 +136,8 @@ class Config:
     # ============================================
     @staticmethod
     def validate():
-        required = ['ANTHROPIC_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
+        """v2.5.3: XAI_API_KEY zorunlu (ANTHROPIC_API_KEY artık opsiyonel)"""
+        required = ['XAI_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
         missing = [key for key in required if not getattr(Config, key)]
         if missing:
             raise ValueError(f"Missing required config: {', '.join(missing)}")

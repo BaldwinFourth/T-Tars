@@ -1,26 +1,56 @@
 # T-TARS CHANGELOG
 
-## v2.5.3 (2026-01-02)
+## v2.5.4 (2026-01-07)
+### Kozmetik Düzeltmeler
+- CHANGED: `_claude` → `_grok` (telegram_handlers.py global değişken)
+- CHANGED: `claude_decision` → `ai_decision` (parametre adı tutarlılığı)
+- CHANGED: Status mesajlarında "Claude AI" → "Grok AI"
+- CHANGED: Help mesajlarında AI engine güncellendi
+- CHANGED: Stop/Start mesajlarında "Claude AI" → "Grok AI"
 
-### 🐛 Bug Fixes
-- **1h Volume Fix:** MARKET_CACHE 20dk sonra expire olunca 1h volume 0.0 dönüyordu
-  - Artık volume_analyzer'a fallback yapılıyor (2 saat 10 dk TTL)
-  - 1h webhook saat başı geliyor, buffer yeterli
+### Dosya Değişiklikleri
+- `telegram_handlers.py`: Tüm Claude referansları Grok olarak güncellendi
+- `bitget_service.py`: `claude_decision` → `ai_decision` parametre adı
+- `main.py`: `ai_decision=decision` parametre çağrısı
+- `app/__init__.py`: Versiyon güncellendi
 
-### 📁 Değişen Dosyalar
-- `volume_analyzer.py` - TTL: 2 saat → 2 saat 10 dakika
-- `bitget_service.py` - Cache miss olunca volume_analyzer fallback
+---
 
-### 🔧 Teknik Detay
+## v2.5.3 (2025-01-07)
+
+### 🚀 MAJOR: Claude → Grok 4.1 Fast Reasoning Geçişi
+
+**AI Engine Değişikliği:**
+- Claude Haiku 4.5 → Grok 4.1 Fast Reasoning
+- Anthropic API → xAI API (OpenAI-compatible format)
+- Maliyet optimizasyonu: $0.20/1M input, $0.50/1M output
+
+**Dosya Değişiklikleri:**
+
+| Dosya | Değişiklik |
+|-------|-----------|
+| `config.py` | XAI_API_KEY, GROK_MODEL eklendi |
+| `grok_service.py` | YENİ - claude_service yerine |
+| `services/__init__.py` | GrokService import, ClaudeService alias |
+| `main.py` | GrokService kullanımı, log mesajları güncellendi |
+| `bitget_service.py` | "Claude" → "AI" log mesajı |
+
+**Yeni ENV Variables:**
 ```
-MARKET_CACHE expired?
-    │
-    ├── YES → volume_analyzer.get_volume() çağır
-    │         ├── Veri var? → Kullan ✅
-    │         └── Veri yok? → 0.0 döndür
-    │
-    └── NO → MARKET_CACHE'den oku ✅
+XAI_API_KEY=xai-...  # Grok API anahtarı
+GROK_MODEL=grok-4-1-fast-reasoning  # Model adı
 ```
+
+**Grok API Özellikleri:**
+- 2M token context window
+- Reasoning enabled (extended thinking)
+- OpenAI-compatible format
+- Tool calling optimized
+
+### 🔧 Volume Cache Fix (önceki commit'ten)
+- 1h volume fallback: MARKET_CACHE expired → volume_analyzer fallback
+- TTL: 7800s (2 saat 10 dakika) buffer
+
 ---
 
 ## v2.5.2 - (2026-01-02)
@@ -53,6 +83,7 @@ MARKET_CACHE expired?
 4. `CHANGELOG.md` - Bu dosya
 
 ---
+# T-TARS - CHANGELOG
 
 ## v2.5.1 (2025-12-30)
 

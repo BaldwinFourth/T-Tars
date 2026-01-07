@@ -7,6 +7,7 @@ Bitget Exchange Service + Copy Trade API (Direct HTTP)
 v2.5.3:
 - NEW: 1h volume fallback - MARKET_CACHE expired ise volume_analyzer'dan oku
 - FIX: 1h volume artık 0.0 dönmüyor (2 saat 10 dk buffer)
+- CHANGED: Log mesajındaki "Claude" → "AI" (generic)
 
 v2.5.2:
 - FIX: VOLUME_STRENGTH_HIGH/MEDIUM → VOLUME_GOOD/MEDIUM (DRY fix)
@@ -1131,7 +1132,7 @@ class BitgetService:
             logger.error(f"Balance fetch error: {e}")
             return {'success': False, 'total': 0, 'free': 0}
 
-    def execute_trade_for_setup(self, setup_data, claude_decision=None):
+    def execute_trade_for_setup(self, setup_data, ai_decision=None):
         try:
             pair = setup_data.get('pair', '')
             direction = setup_data.get('direction', 'LONG').upper()
@@ -1159,8 +1160,8 @@ class BitgetService:
             coin_name = symbol.replace('/USDT:USDT', '')
             side = 'buy' if direction == 'LONG' else 'sell'
             
-            if claude_decision:
-                logger.info(f"🧠 Claude: {claude_decision.get('action', 'N/A')} ({claude_decision.get('confidence', 0)}%)")
+            if ai_decision:
+                logger.info(f"🧠 AI: {ai_decision.get('action', 'N/A')} ({ai_decision.get('confidence', 0)}%)")
             
             logger.info(f"🚀 Execute Trade: {coin_name} {direction}")
             

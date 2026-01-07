@@ -1,5 +1,19 @@
 # T-TARS Changelog
 
+## v2.5.7 (2025-01-07)
+
+### 🔧 Bug Fix
+- **FIX:** `reasoning_effort` parametresi kaldırıldı
+  - `grok-4-1-fast-reasoning` modeli bu parametreyi desteklemiyor
+  - API 400 hatası: "Model does not support parameter reasoningEffort"
+  - Model adı zaten reasoning içeriyor, ekstra parametreye gerek yok
+
+### 📝 Değişiklikler
+- `analyze()` fonksiyonundan `reasoning_effort="high"` kaldırıldı
+- `evaluate_setup()` fonksiyonundan `reasoning_effort="high"` kaldırıldı
+
+---
+
 ## v2.5.6 (2025-01-07)
 
 ### 🐛 Critical Bug Fixes

@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Grok Service v2.5.6
+T-TARS Grok Service v2.5.7
 ==============================
-Grok 4.1 Fast Reasoning API wrapper for market analysis and setup evaluation.
+Grok API wrapper for market analysis and setup evaluation.
+
+v2.5.7:
+- FIX: reasoning_effort parametresi kaldırıldı (grok-4-1-fast-reasoning desteklemiyor)
 
 v2.5.6:
 - FIX: Pre-filter mantığı Claude service v2.5.2'den birebir alındı
 - FIX: Operatör hataları düzeltildi (<=, >= karışıklığı)
-- FIX: Duplicate kontrol blokları kaldırıldı
-- CHANGED: Log'larda "Current" → "Price" terminolojisi
+- ADD: Her fonksiyona ENTRY/EXIT log eklendi
+- ADD: openai>=1.0.0 requirements.txt'e eklendi
 
 v2.5.3:
 - NEW: Claude → Grok 4.1 Fast Reasoning geçişi
@@ -123,11 +126,11 @@ class GrokService:
         """
         Genel analiz yap (eski fonksiyon - backward compat)
         """
+        logger.info(f"🔍 analyze() ENTRY | prompt_len: {len(prompt)} chars")
         try:
             response = self.client.chat.completions.create(
                 model=Config.GROK_MODEL,
                 max_tokens=16000,
-                reasoning_effort="high",
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
@@ -143,10 +146,12 @@ class GrokService:
             }
             
             logger.info(f"Analysis complete: {result['input_tokens']}→{result['output_tokens']} tokens")
+            logger.info(f"🔍 analyze() EXIT | SUCCESS")
             return result
             
         except Exception as e:
             logger.error(f"Grok API error: {e}")
+            logger.error(f"🔍 analyze() EXIT | ERROR: {e}")
             raise
     
     def adjust_stop_and_tp(self, entry_price, stop_price, tp_price, direction):
@@ -164,6 +169,8 @@ class GrokService:
             dict: {'stop_price', 'tp_price', 'adjusted', 'adjustment_type', ...}
             None: SKIP gerekiyorsa
         """
+        logger.debug(f"🔧 adjust_stop_and_tp() ENTRY | {direction} | Entry: {entry_price} | Stop: {stop_price} | TP: {tp_price}")
+        
         entry = float(entry_price)
         stop = float(stop_price)
         tp = float(tp_price)
@@ -197,6 +204,7 @@ class GrokService:
         # ============================================
         if stop_pct >= self.STOP_ADJUST_MAX:
             logger.info(f"🚫 Stop Adjustment: %{stop_pct:.2f} >= %{self.STOP_ADJUST_MAX} → SKIP gerekli")
+            logger.debug(f"🔧 adjust_stop_and_tp() EXIT | SKIP (stop too large)")
             return None
         
         # ============================================
@@ -204,6 +212,7 @@ class GrokService:
         # ============================================
         if self.STOP_MIN_PCT <= stop_pct <= self.STOP_IDEAL_MAX:
             logger.debug(f"✅ Stop ideal aralıkta: %{stop_pct:.2f}")
+            logger.debug(f"🔧 adjust_stop_and_tp() EXIT | NO_CHANGE (ideal range)")
             return result
         
         # ============================================
@@ -241,6 +250,7 @@ class GrokService:
                        f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {new_rr:.2f}")
             
+            logger.debug(f"🔧 adjust_stop_and_tp() EXIT | EXPAND")
             return result
         
         # ============================================
@@ -278,6 +288,7 @@ class GrokService:
                        f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {new_rr:.2f}")
             
+            logger.debug(f"🔧 adjust_stop_and_tp() EXIT | SHRINK")
             return result
         
         # ============================================
@@ -310,15 +321,21 @@ class GrokService:
                        f"TP: {format_price_display(tp)} → {format_price_display(new_tp)} | "
                        f"R:R: {original_rr:.2f} → {self.AGGRESSIVE_RR}")
             
+            logger.debug(f"🔧 adjust_stop_and_tp() EXIT | AGGRESSIVE")
             return result
         
         # Buraya gelmemeli ama güvenlik için
+        logger.debug(f"🔧 adjust_stop_and_tp() EXIT | FALLBACK (no adjustment matched)")
         return result
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
         v2.5.6: AI Setup Değerlendirmesi - Claude v2.5.2 mantığı + Grok API
         """
+        pair = setup_data.get('pair', 'UNKNOWN')
+        direction = setup_data.get('direction', 'UNKNOWN')
+        logger.info(f"🎯 evaluate_setup() ENTRY | {pair} {direction} | python_score: {python_score}")
+        
         try:
             # DEBUG: Gelen veriyi logla
             logger.debug(f"📥 setup_data keys: {list(setup_data.keys())}")
@@ -589,12 +606,11 @@ SADECE JSON formatında cevap ver:
 {{"action": "ENTER", "confidence": 85, "reasoning": "kısa açıklama max 80 karakter"}}"""
 
             # GROK API ÇAĞRISI
-            logger.debug(f"🧠 [{pair}]: Grok API çağrılıyor (reasoning: high)...")
+            logger.debug(f"🧠 [{pair}]: Grok API çağrılıyor...")
             
             response = self.client.chat.completions.create(
                 model=Config.GROK_MODEL,
                 max_tokens=16000,
-                reasoning_effort="high",
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
@@ -648,14 +664,17 @@ SADECE JSON formatında cevap ver:
             adj_tag = f" [ADJ:{adjustment_result['adjustment_type']}]" if adjustment_result['adjusted'] else ""
             logger.info(f"🧠 Grok [{pair}] {direction} [{timeframe}]{adj_tag} → {emoji} {action} ({result['confidence']}%) | {result['reasoning'][:50]}...")
             
+            logger.info(f"🎯 evaluate_setup() EXIT | {pair} → {action} | tokens: {result['input_tokens']}→{result['output_tokens']}")
             return result
             
         except Exception as e:
             logger.error(f"❌ Grok evaluate_setup error: {e}", exc_info=True)
+            logger.error(f"🎯 evaluate_setup() EXIT | ERROR: {e}")
             return self._skip_response(f"Grok API error: {str(e)[:50]}")
     
     def _skip_response(self, reason):
         """Standart SKIP response oluştur"""
+        logger.debug(f"⏭️ _skip_response() | reason: {reason}")
         return {
             'action': 'SKIP',
             'confidence': 0,

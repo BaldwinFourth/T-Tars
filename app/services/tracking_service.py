@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Tracking Service v2.4.3
+T-TARS Tracking Service v2.5.8
 ===============================
 Setup Logging & Performance Analytics Service
+
+v2.5.8:
+- NEW: cleanup_old_setups() - Eski kayıtları otomatik temizle
+  - 4+ gün eski EXPIRED/CLOSED/CANCELLED → SİL
+  - 4+ gün eski PENDING + tracking_no=null → SİL (stale)
+  - FILLED veya tracking_no var → KORU
 
 v2.4.3:
 - CHANGED: UPDATE_NEEDED → REPLACE (daha net isimlendirme)
@@ -48,6 +54,9 @@ MIN_TRADES_FOR_RANKING = 3
 # v2.3.11: TF bazlı expiry süreleri (saat)
 EXPIRY_HOURS_SHORT_TF = 2   # 5m, 3m
 EXPIRY_HOURS_LONG_TF = 4    # 15m, 30m, 1h, 4h
+
+# v2.5.8: Auto-cleanup için yaş limiti (gün)
+CLEANUP_AGE_DAYS = 4
 
 
 def get_expiry_hours(timeframe):
@@ -97,13 +106,123 @@ def calculate_ranking_score(win_rate, trade_count):
 
 
 class TrackingService:
-    """Setup Logging & Performance Analytics Service v2.3.14"""
+    """Setup Logging & Performance Analytics Service v2.5.8"""
     
     def __init__(self, bucket_name='tars-trading-data'):
         self.bucket_name = bucket_name
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
-        logger.info(f"✅ Tracking Service initialized: {bucket_name}")
+        logger.info(f"✅ Tracking Service v2.5.8 initialized: {bucket_name}")
+    
+    def cleanup_old_setups(self):
+        """
+        v2.5.8: Eski kayıtları otomatik temizle
+        
+        Silme Kriterleri:
+        1. 4+ gün eski VE status = EXPIRED/CLOSED/CANCELLED → SİL
+        2. 4+ gün eski VE status = PENDING VE tracking_no = null → SİL (stale)
+        
+        Koruma Kriterleri:
+        - status = FILLED → KORU (aktif pozisyon)
+        - tracking_no var → KORU (gerçek trade)
+        - 4 günden yeni → KORU
+        
+        Returns:
+            dict: {'deleted': int, 'kept': int, 'errors': int}
+        """
+        deleted_count = 0
+        kept_count = 0
+        error_count = 0
+        now = datetime.now(TURKEY_TZ)
+        cutoff_time = now - timedelta(days=CLEANUP_AGE_DAYS)
+        
+        try:
+            blobs = list(self.bucket.list_blobs(prefix='setups/'))
+            total_blobs = len(blobs)
+            
+            logger.info(f"🧹 Cleanup başladı: {total_blobs} kayıt kontrol edilecek (cutoff: {CLEANUP_AGE_DAYS} gün)")
+            
+            for blob in blobs:
+                if not blob.name.endswith('.json'):
+                    continue
+                
+                try:
+                    setup = json.loads(blob.download_as_string())
+                    setup_id = setup.get('setup_id', blob.name)
+                    status = setup.get('status', '')
+                    tracking_no = setup.get('tracking_no')
+                    created_at_str = setup.get('created_at')
+                    
+                    # Yaş hesapla
+                    if not created_at_str:
+                        # created_at yoksa blob metadata'dan al
+                        blob_age_days = (now - blob.time_created.replace(tzinfo=TURKEY_TZ)).days if blob.time_created else 0
+                        is_old = blob_age_days >= CLEANUP_AGE_DAYS
+                    else:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str)
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=TURKEY_TZ)
+                            is_old = created_at < cutoff_time
+                        except:
+                            is_old = False
+                    
+                    # Silme kararı
+                    should_delete = False
+                    reason = ""
+                    
+                    if not is_old:
+                        # 4 günden yeni → KORU
+                        kept_count += 1
+                        continue
+                    
+                    # 4+ gün eski kayıtlar için kontrol
+                    if status in ['EXPIRED', 'CLOSED', 'CANCELLED']:
+                        # Tamamlanmış/iptal edilmiş → SİL
+                        should_delete = True
+                        reason = f"Old {status}"
+                    
+                    elif status == 'PENDING' and not tracking_no:
+                        # Stale PENDING (hiç trade açılmamış) → SİL
+                        should_delete = True
+                        reason = "Stale PENDING (no tracking_no)"
+                    
+                    elif status == 'FILLED':
+                        # Aktif pozisyon → KORU
+                        kept_count += 1
+                        continue
+                    
+                    elif tracking_no:
+                        # Gerçek trade var → KORU
+                        kept_count += 1
+                        continue
+                    
+                    else:
+                        # Diğer durumlar → KORU (güvenlik)
+                        kept_count += 1
+                        continue
+                    
+                    # Sil
+                    if should_delete:
+                        blob.delete()
+                        deleted_count += 1
+                        logger.debug(f"🗑️ Deleted: {setup_id} ({reason})")
+                    
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"❌ Cleanup error ({blob.name}): {e}")
+            
+            logger.info(f"🧹 Cleanup tamamlandı: {deleted_count} silindi, {kept_count} korundu, {error_count} hata")
+            
+            return {
+                'deleted': deleted_count,
+                'kept': kept_count,
+                'errors': error_count
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ cleanup_old_setups error: {e}")
+            return {'deleted': 0, 'kept': 0, 'errors': 1}
     
     def check_and_expire_orders(self, exchange):
         """

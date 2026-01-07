@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.5.3
+T-TARS Configuration v2.5.9
 ============================
+
+v2.5.9:
+- REMOVED: JUP, NIGHT, HYPE çıkarıldı
+- ADDED: PEPE, LINK, ZEC eklendi
+- Toplam: 14 coin (değişmedi)
 
 v2.5.3:
 - NEW: XAI_API_KEY - Grok API anahtarı
@@ -20,7 +25,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.5.3"""
+    """T-TARS Configuration v2.5.9"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -81,34 +86,34 @@ class Config:
     TIMEFRAMES = ['1h', '15m']
     
     # ============================================
-    # TRADING PAIRS (v2.4.13 - 14 coin)
+    # TRADING PAIRS (v2.5.9 - 14 coin)
     # ============================================
     
     AUTO_SCAN_PAIRS = [
         'ETH/USDT:USDT',   # Ethereum
         'SOL/USDT:USDT',   # Solana
         'BNB/USDT:USDT',   # BNB
-        'JUP/USDT:USDT',   # Jupiter
         'XRP/USDT:USDT',   # Ripple
         'TRX/USDT:USDT',   # Tron
-        'NIGHT/USDT:USDT', # Night
         'BCH/USDT:USDT',   # Bitcoin Cash
         'DOGE/USDT:USDT',  # Dogecoin
-        'LTC/USDT:USDT',   # Litecoin (yeni)
-        'SUI/USDT:USDT',   # Sui (yeni)
-        'ADA/USDT:USDT',   # Cardano (yeni)
-        'AVAX/USDT:USDT',  # Avalanche (yeni)
-        'HYPE/USDT:USDT',  # Hype (yeni)
+        'LTC/USDT:USDT',   # Litecoin
+        'SUI/USDT:USDT',   # Sui
+        'ADA/USDT:USDT',   # Cardano
+        'AVAX/USDT:USDT',  # Avalanche
+        'PEPE/USDT:USDT',  # Pepe (yeni v2.5.9)
+        'LINK/USDT:USDT',  # Chainlink (yeni v2.5.9)
+        'ZEC/USDT:USDT',   # Zcash (yeni v2.5.9)
     ]
     
     MANUAL_PAIRS = [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
         'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 
-        'TRUMP/USDT:USDT', 'JUP/USDT:USDT', 'AVAX/USDT:USDT', 
-        'SHIB/USDT:USDT', 'BNB/USDT:USDT', 'HYPE/USDT:USDT', 
+        'TRUMP/USDT:USDT', 'AVAX/USDT:USDT', 
+        'SHIB/USDT:USDT', 'BNB/USDT:USDT',
         'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
         'PUMP/USDT:USDT', 'BCH/USDT:USDT', 'ADA/USDT:USDT',
-        'XAUT/USDT:USDT', 'FLOKI/USDT:USDT', 'NIGHT/USDT:USDT',
+        'FLOKI/USDT:USDT', 'LINK/USDT:USDT', 'ZEC/USDT:USDT',
     ]
     
     # ============================================

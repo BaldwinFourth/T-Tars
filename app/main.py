@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.5.4
+T-TARS Trading Bot v2.5.8
 ===========================
 Main Flask application with routes.
+
+v2.5.8:
+- NEW: cleanup_old_setups() - Eski GCS kayıtlarını otomatik temizle
+  - 4+ gün eski EXPIRED/CLOSED/CANCELLED → SİL
+  - 4+ gün eski stale PENDING (tracking_no=null) → SİL
 
 v2.5.4:
 - CHANGED: claude_decision → ai_decision (parametre adı tutarlılığı)
@@ -75,6 +80,9 @@ MARKET_CACHE = {}
 
 # Turkey timezone
 TURKEY_TZ = timezone(timedelta(hours=3))
+
+# v2.5.8: Son cleanup zamanı (günde 1 kez)
+LAST_CLEANUP_DATE = None
 
 
 def format_price(price):
@@ -456,8 +464,10 @@ def monitor_setups():
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
     """
-    v2.5.3: Grok 4.1 Fast Reasoning ile Otomatik Tarama
+    v2.5.8: Grok 4.1 Fast Reasoning ile Otomatik Tarama + GCS Cleanup
     """
+    global LAST_CLEANUP_DATE
+    
     interval = Config.MONITOR_INTERVAL_MINUTES
     current_minute = datetime.now().minute
     if current_minute % interval != 1:
@@ -476,6 +486,15 @@ def auto_analyze():
     with SCAN_LOCK:
         try:
             logger.info(f"🔄 Auto analyze started (v{Config.VERSION})")
+            
+            # v2.5.8: Günde 1 kez GCS cleanup
+            today = datetime.now(TURKEY_TZ).date()
+            cleanup_result = None
+            if LAST_CLEANUP_DATE != today:
+                cleanup_result = tracking.cleanup_old_setups()
+                LAST_CLEANUP_DATE = today
+                if cleanup_result.get('deleted', 0) > 0:
+                    logger.info(f"🧹 GCS Cleanup: {cleanup_result['deleted']} eski kayıt silindi")
             
             vol_cleaned = cleanup_expired_volumes()
             if vol_cleaned > 0:
@@ -706,7 +725,7 @@ def auto_analyze():
             logger.info(f"✅ Auto analyze: {orders_placed} orders, {grok_skips} skipped | Cache: {cache_hits} hits, {cache_misses} misses")
             gc.collect()
             
-            return jsonify({
+            response = {
                 "status": "success",
                 "orders": orders_placed,
                 "grok_skips": grok_skips,  # v2.5.3
@@ -714,7 +733,12 @@ def auto_analyze():
                 "volume_cache_hits": cache_hits,
                 "volume_cache_misses": cache_misses,
                 "volume_store_size": vol_stats.get('total', 0)
-            })
+            }
+            
+            if cleanup_result:
+                response['gcs_cleanup'] = cleanup_result
+            
+            return jsonify(response)
             
         except Exception as e:
             logger.error(f"❌ Auto analyze CRASH: {e}")

@@ -1,6 +1,55 @@
-# T-TARS Changelog
+# T-TARS Changelog v2.5.9
 
-## v2.5.7 (2025-01-07)
+## v2.5.9 (2026-01-08)
+
+### 🔄 Coin Listesi Değişikliği
+- **REMOVED:** JUP, NIGHT, HYPE çıkarıldı
+- **ADDED:** PEPE, LINK, ZEC eklendi
+- Toplam: 14 coin (sayı aynı)
+
+### 🗑️ GCS Auto-Cleanup (v2.5.8'den)
+- Günde 1 kez otomatik eski setup temizliği
+- 4+ gün eski EXPIRED/CLOSED/CANCELLED → siliniyor
+- Stale PENDING (tracking_no=null) → siliniyor
+- FILLED veya tracking_no olan kayıtlar korunuyor
+
+### 📝 Logging Optimizasyonu (v2.5.8'den)
+- grok_service: tokens log kaldırıldı (gereksiz)
+- ENTRY/EXIT logları korundu (debug için gerekli)
+
+### 📁 Değişen Dosyalar
+- `config.py` - AUTO_SCAN_PAIRS güncellendi
+- `main.py` - GCS cleanup entegrasyonu
+- `tracking_service.py` - cleanup_old_setups() fonksiyonu
+- `grok_service.py` - tokens log kaldırıldı
+
+### ⚠️ TradingView Gereksinimleri
+- PineScript v15 1h Scanner - yeni indicator ekle
+- PineScript v15 15m Scanner - yeni indicator ekle
+- Mevcut alert'leri güncelle (JUP/NIGHT/HYPE → PEPE/LINK/ZEC)
+
+---
+
+## v2.5.8 (2026-01-07)
+
+### 🆕 New Features
+- **GCS Auto-Cleanup**: Eski setup kayıtlarını otomatik temizleme
+  - 4+ gün eski EXPIRED/CLOSED/CANCELLED kayıtları sil
+  - 4+ gün eski stale PENDING (tracking_no=null) kayıtları sil
+  - Günde 1 kez çalışır (auto-analyze içinde)
+
+### 🔧 Technical
+- tracking_service.py: `cleanup_old_setups()` fonksiyonu eklendi
+- main.py: Auto-analyze başında günlük cleanup çağrısı
+- LAST_CLEANUP_DATE ile günde 1 kez kontrolü
+- grok_service.py: tokens logu kaldırıldı (gereksiz)
+
+### 🐛 Bug Fixes
+- XRP duplicate detection hatası düzeltildi (stale PENDING kayıt)
+
+---
+
+## v2.5.7 (2026-01-07)
 
 ### 🔧 Bug Fix
 - **FIX:** `reasoning_effort` parametresi kaldırıldı
@@ -14,7 +63,7 @@
 
 ---
 
-## v2.5.6 (2025-01-07)
+## v2.5.6 (2026-01-07)
 
 ### 🐛 Critical Bug Fixes
 - **FIX**: Pre-filter mantığı Claude service v2.5.2'den birebir alındı
@@ -37,7 +86,7 @@ API geçişinde (Claude→Grok) sadece API çağrısını değiştir, iş mantı
 
 ---
 
-## v2.5.5 (2025-01-07)
+## v2.5.5 (2026-01-07)
 
 ### 🐛 Bug Fixes
 - **REMOVED**: Erken Stop-Entry mesafe kontrolü

@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Grok Service v2.5.7
+T-TARS Grok Service v2.5.8
 ==============================
 Grok API wrapper for market analysis and setup evaluation.
+
+v2.5.8:
+- REMOVED: tokens logu evaluate_setup EXIT'den kaldırıldı (gereksiz)
 
 v2.5.7:
 - FIX: reasoning_effort parametresi kaldırıldı (grok-4-1-fast-reasoning desteklemiyor)
@@ -82,7 +85,7 @@ def format_price_display(price):
 
 
 class GrokService:
-    """Grok 4.1 Fast Reasoning API Service - v2.5.6 (AI Decision Engine + %1.0 Stop)"""
+    """Grok 4.1 Fast Reasoning API Service - v2.5.8 (AI Decision Engine + %1.0 Stop)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -117,7 +120,7 @@ class GrokService:
         # v2.4.14: Thinking budget (Grok reasoning için)
         self.thinking_budget = Config.THINKING_BUDGET
         
-        logger.info(f"✅ Grok Service v2.5.6 initialized: {Config.GROK_MODEL} | "
+        logger.info(f"✅ Grok Service v2.5.8 initialized: {Config.GROK_MODEL} | "
                    f"Thinking: {self.thinking_budget} tokens | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
@@ -330,7 +333,7 @@ class GrokService:
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
-        v2.5.6: AI Setup Değerlendirmesi - Claude v2.5.2 mantığı + Grok API
+        v2.5.8: AI Setup Değerlendirmesi - Claude v2.5.2 mantığı + Grok API
         """
         pair = setup_data.get('pair', 'UNKNOWN')
         direction = setup_data.get('direction', 'UNKNOWN')
@@ -659,12 +662,13 @@ SADECE JSON formatında cevap ver:
                 'output_tokens': response.usage.completion_tokens
             }
             
-            # Log
+            # Log - v2.5.8: tokens kaldırıldı
             emoji = "✅" if action == "ENTER" else "⏭️" if action == "SKIP" else "⏸️"
             adj_tag = f" [ADJ:{adjustment_result['adjustment_type']}]" if adjustment_result['adjusted'] else ""
             logger.info(f"🧠 Grok [{pair}] {direction} [{timeframe}]{adj_tag} → {emoji} {action} ({result['confidence']}%) | {result['reasoning'][:50]}...")
             
-            logger.info(f"🎯 evaluate_setup() EXIT | {pair} → {action} | tokens: {result['input_tokens']}→{result['output_tokens']}")
+            # v2.5.8: tokens logu kaldırıldı
+            logger.info(f"🎯 evaluate_setup() EXIT | {pair} → {action}")
             return result
             
         except Exception as e:

@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Grok Service v2.5.3
+T-TARS Grok Service v2.5.5
 ==============================
 Grok 4.1 Fast Reasoning API wrapper for market analysis and setup evaluation.
+
+v2.5.5:
+- REMOVED: Erken Stop-Entry mesafe kontrolü (adjustment'tan önce çalışıyordu)
+- FIX: Küçük stop'lu setup'lar artık adjustment'a ulaşabilir
+- CHANGED: Log'larda "Current" → "Price" terminoloji değişikliği
 
 v2.5.3:
 - NEW: Claude → Grok 4.1 Fast Reasoning geçişi
@@ -97,7 +102,7 @@ class GrokService:
     AGGRESSIVE_RR = 3.0     # 2-2.5% arası için R:R
     
     # v2.5.2: Minimum mesafe sabiti - %0.8 → %1.0
-    MIN_DISTANCE_PCT = 0.01  # %1.0 - Stop-Entry ve Stop-Current için minimum
+    MIN_DISTANCE_PCT = 0.01  # %1.0 - Stop-Entry ve Stop-Price için minimum
     
     def __init__(self):
         self.api_key = Config.XAI_API_KEY
@@ -374,10 +379,10 @@ class GrokService:
             # YÖNLÜ SANITY CHECK
             is_long = direction == 'LONG'
             
-            # Entry-Current mesafe kontrolü
+            # Entry-Price mesafe kontrolü
             entry_current_pct = abs(entry_price - current_price) / current_price if current_price > 0 else 0
             if entry_current_pct > 0.05:  # %5'ten uzaksa
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Entry-Current çok uzak (%{entry_current_pct*100:.2f})")
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Entry-Price çok uzak (%{entry_current_pct*100:.2f})")
                 return self._skip_response(f"{pair}: Entry current'tan %{entry_current_pct*100:.1f} uzakta")
             
             # Yön kontrolü
@@ -386,35 +391,27 @@ class GrokService:
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG Stop >= Entry")
                     return self._skip_response(f"{pair}: LONG Stop >= Entry")
                 if current_price <= stop_price:
-                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG Current <= Stop (zaten SL'de)")
-                    return self._skip_response(f"{pair}: Current zaten stop altında")
+                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG Price <= Stop (zaten SL'de)")
+                    return self._skip_response(f"{pair}: Price zaten stop altında")
             else:
                 if stop_price <= entry_price:
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT Stop <= Entry")
                     return self._skip_response(f"{pair}: SHORT Stop <= Entry")
                 if current_price >= stop_price:
-                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT Current >= Stop")
-                    return self._skip_response(f"{pair}: Current zaten stop üstünde")
-            
-            # LIMIT ORDER GÜVENLİK KONTROLÜ
-            stop_entry_pct = abs(stop_price - entry_price) / entry_price if entry_price > 0 else 0
-            if stop_entry_pct < self.MIN_DISTANCE_PCT:
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Entry mesafesi çok küçük!")
-                logger.warning(f"   Stop: {format_price_display(stop_price)} | Entry: {format_price_display(entry_price)}")
-                logger.warning(f"   Stop-Entry: %{stop_entry_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
-                return self._skip_response(f"{pair}: Stop-Entry %{stop_entry_pct*100:.2f} < %1.0 minimum")
+                    logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT Price >= Stop")
+                    return self._skip_response(f"{pair}: Price zaten stop üstünde")
             
             # LIMIT PRICE SANITY CHECK
             if is_long:
                 if entry_price > current_price * 1.02:
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: LONG Entry fiyat çok yüksek!")
-                    logger.warning(f"   Entry({format_price_display(entry_price)}) > Current({format_price_display(current_price)}) * 1.02")
-                    return self._skip_response(f"{pair}: LONG Entry current'tan %2+ yüksek")
+                    logger.warning(f"   Entry({format_price_display(entry_price)}) > Price({format_price_display(current_price)}) * 1.02")
+                    return self._skip_response(f"{pair}: LONG Entry price'tan %2+ yüksek")
             else:
                 if entry_price < current_price * 0.98:
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT Entry fiyat çok düşük!")
-                    logger.warning(f"   Entry({format_price_display(entry_price)}) < Current({format_price_display(current_price)}) * 0.98")
-                    return self._skip_response(f"{pair}: SHORT Entry current'tan %2+ düşük")
+                    logger.warning(f"   Entry({format_price_display(entry_price)}) < Price({format_price_display(current_price)}) * 0.98")
+                    return self._skip_response(f"{pair}: SHORT Entry price'tan %2+ düşük")
             
             # ORDER YÖN KONTROLÜ
             if is_long:
@@ -424,12 +421,12 @@ class GrokService:
                 if current_price <= entry_price:
                     pass
                 else:
-                    logger.warning(f"⚠️ [{pair}]: LONG Current({format_price_display(current_price)}) > Entry({format_price_display(entry_price)})")
-                    logger.warning(f"   Stop({format_price_display(stop_price)}) < Entry({format_price_display(entry_price)}) < Current({format_price_display(current_price)}) olmalı")
+                    logger.warning(f"⚠️ [{pair}]: LONG Price({format_price_display(current_price)}) > Entry({format_price_display(entry_price)})")
+                    logger.warning(f"   Stop({format_price_display(stop_price)}) < Entry({format_price_display(entry_price)}) < Price({format_price_display(current_price)}) olmalı")
                     if stop_price >= entry_price:
                         return self._skip_response(f"{pair}: LONG Stop >= Entry")
                     if current_price <= stop_price:
-                        return self._skip_response(f"{pair}: LONG Current <= Stop, limit hemen fill olur")
+                        return self._skip_response(f"{pair}: LONG Price <= Stop, limit hemen fill olur")
             else:
                 if entry_price <= stop_price:
                     logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: SHORT Entry <= Stop - Geçersiz!")
@@ -437,12 +434,12 @@ class GrokService:
                 if current_price >= entry_price:
                     pass
                 else:
-                    logger.warning(f"⚠️ [{pair}]: SHORT Current({format_price_display(current_price)}) < Entry({format_price_display(entry_price)})")
-                    logger.warning(f"   Current({format_price_display(current_price)}) < Entry({format_price_display(entry_price)}) < Stop({format_price_display(stop_price)}) olmalı")
+                    logger.warning(f"⚠️ [{pair}]: SHORT Price({format_price_display(current_price)}) < Entry({format_price_display(entry_price)})")
+                    logger.warning(f"   Price({format_price_display(current_price)}) < Entry({format_price_display(entry_price)}) < Stop({format_price_display(stop_price)}) olmalı")
                     if entry_price >= stop_price:
                         return self._skip_response(f"{pair}: SHORT Entry >= Stop")
                     if current_price >= entry_price:
-                        return self._skip_response(f"{pair}: SHORT Current >= Entry, limit hemen fill olur")
+                        return self._skip_response(f"{pair}: SHORT Price >= Entry, limit hemen fill olur")
             
             # TP Sanity Check
             if is_long and tp_price <= entry_price:
@@ -522,12 +519,12 @@ class GrokService:
             # STOP-CURRENT KONTROLÜ (ADJUSTED değerlerle!)
             stop_current_pct = abs(stop_price - current_price) / current_price if current_price > 0 else 0
             if stop_current_pct < self.MIN_DISTANCE_PCT:
-                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Current mesafesi çok küçük (ADJUSTED)!")
-                logger.warning(f"   Adjusted Stop: {format_price_display(stop_price)} | Current: {format_price_display(current_price)}")
-                logger.warning(f"   Stop-Current: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
-                return self._skip_response(f"{pair}: Stop-Current %{stop_current_pct*100:.2f} < %1.0 minimum")
+                logger.warning(f"⏭️ Pre-filter SKIP [{pair}]: Stop-Price mesafesi çok küçük (ADJUSTED)!")
+                logger.warning(f"   Adjusted Stop: {format_price_display(stop_price)} | Price: {format_price_display(current_price)}")
+                logger.warning(f"   Stop-Price: %{stop_current_pct*100:.2f} < %{self.MIN_DISTANCE_PCT*100}")
+                return self._skip_response(f"{pair}: Stop-Price %{stop_current_pct*100:.2f} < %1.0 minimum")
             
-            logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti (ADJUSTED): Stop-Current: %{stop_current_pct*100:.2f}")
+            logger.debug(f"✅ [{pair}] Güvenlik kontrolleri geçti (ADJUSTED): Stop-Price: %{stop_current_pct*100:.2f}")
             
             # ÖN KONTROLLER
             if round(rr_ratio, 2) < MIN_RR_RATIO:
@@ -580,7 +577,7 @@ class GrokService:
 - R:R Ratio: {rr_ratio:.2f}
 {score_info}{adjustment_info}
 ## MARKET VERİSİ:
-- Current Price: {format_price_display(current_price)}
+- Price: {format_price_display(current_price)}
 - PDC Bias: {pdc_bias.upper() if pdc_bias else 'UNKNOWN'}
 - PDC High: {format_price_display(pdc_high)}
 - PDC Low: {format_price_display(pdc_low)}

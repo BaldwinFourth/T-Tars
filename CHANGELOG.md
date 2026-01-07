@@ -1,4 +1,37 @@
-# T-TARS CHANGELOG
+# T-TARS Changelog
+
+## v2.5.5 (2025-01-07)
+
+### 🐛 Bug Fixes
+- **REMOVED**: Erken Stop-Entry mesafe kontrolü
+  - Bu kontrol ADJUSTMENT'tan ÖNCE çalışıyordu
+  - Küçük stop'lu setup'lar (<%1.0) hiç adjustment'a ulaşamıyordu
+  - Şimdi adjustment expand yapabilir, sonra Stop-Price kontrolü yapılır
+  
+### 📝 Terminology Changes
+- Log mesajlarında "Current" → "Price" değiştirildi
+  - `Stop-Current` → `Stop-Price`
+  - `Entry-Current` → `Entry-Price`
+  - `Current zaten stop üstünde` → `Price zaten stop üstünde`
+  - Kullanıcı terminolojisine uyum sağlandı
+
+### 🔄 Flow Comparison
+
+**Before (v2.5.3 - YANLIŞ):**
+```
+1. Stop-Entry < %1.0 → SKIP ❌ (erken)
+2. ADJUSTMENT → HİÇ ÇALIŞMAZ
+```
+
+**After (v2.5.5 - DOĞRU):**
+```
+1. Basic validation
+2. ADJUSTMENT → Stop %0.74 → %1.0 EXPAND
+3. Stop-Price kontrolü (ADJUSTED değerlerle)
+4. Grok API'ye gider
+```
+
+---
 
 ## v2.5.4 (2026-01-07)
 ### Kozmetik Düzeltmeler
@@ -16,7 +49,7 @@
 
 ---
 
-## v2.5.3 (2025-01-07)
+## v2.5.3 (2026-01-07)
 
 ### 🚀 MAJOR: Claude → Grok 4.1 Fast Reasoning Geçişi
 

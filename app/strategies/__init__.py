@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Strategies v2.5.1
+T-TARS Strategies v2.6.0
 ==========================
 Trading strategy modülleri.
+
+v2.6.0:
+- NEW: detect_candle_patterns export
+- NEW: Pattern detection threshold sabitleri export
 
 v2.5.1:
 - ADDED: OB_LOOKBACK, FVG_LOOKBACK export
@@ -36,6 +40,8 @@ from .calculators import (
     is_in_ob_zone,
     is_in_fvg_zone,
     check_doji,
+    # v2.6.0: Pattern Detection
+    detect_candle_patterns,
     # R:R Constants
     MIN_RR_RATIO,
     STOP_MULTIPLIER,
@@ -65,6 +71,27 @@ from .calculators import (
     MAX_ENTRY_DISTANCE_PERCENT,
     MAX_OB_COUNT,
     MAX_FVG_COUNT,
+    # v2.6.0: Pattern Detection Constants
+    DOJI_SHADOW_RATIO,
+    DOJI_LONGLEG_MULTIPLIER,
+    HAMMER_SHADOW_RATIO,
+    HAMMER_OPPOSITE_MAX,
+    ENGULF_MIN_RATIO,
+    ENGULF_PARTIAL_RATIO,
+    PIERCING_MIN_RATIO,
+    MOMENTUM_SHRINK_RATIO,
+    MOMENTUM_GROW_RATIO,
+    MOMENTUM_MIN_COUNT,
+    TREND_MIN_CANDLES,
+    TREND_LOOKBACK,
+    SWEEP_WICK_RATIO,
+    SWEEP_LOOKBACK,
+    CONFIDENCE_3_CANDLE,
+    CONFIDENCE_2_CANDLE,
+    CONFIDENCE_1_CANDLE,
+    CONFIDENCE_MOMENTUM,
+    CONTEXT_REVERSAL_BONUS,
+    CONTEXT_WRONG_PENALTY,
 )
 
 from .ob_detector import (
@@ -117,6 +144,8 @@ __all__ = [
     'is_in_ob_zone',
     'is_in_fvg_zone',
     'check_doji',
+    # Calculators - Pattern Detection (v2.6.0)
+    'detect_candle_patterns',
     # Calculators - R:R Constants
     'MIN_RR_RATIO',
     'STOP_MULTIPLIER',
@@ -146,6 +175,27 @@ __all__ = [
     'MAX_ENTRY_DISTANCE_PERCENT',
     'MAX_OB_COUNT',
     'MAX_FVG_COUNT',
+    # Calculators - Pattern Detection Constants (v2.6.0)
+    'DOJI_SHADOW_RATIO',
+    'DOJI_LONGLEG_MULTIPLIER',
+    'HAMMER_SHADOW_RATIO',
+    'HAMMER_OPPOSITE_MAX',
+    'ENGULF_MIN_RATIO',
+    'ENGULF_PARTIAL_RATIO',
+    'PIERCING_MIN_RATIO',
+    'MOMENTUM_SHRINK_RATIO',
+    'MOMENTUM_GROW_RATIO',
+    'MOMENTUM_MIN_COUNT',
+    'TREND_MIN_CANDLES',
+    'TREND_LOOKBACK',
+    'SWEEP_WICK_RATIO',
+    'SWEEP_LOOKBACK',
+    'CONFIDENCE_3_CANDLE',
+    'CONFIDENCE_2_CANDLE',
+    'CONFIDENCE_1_CANDLE',
+    'CONFIDENCE_MOMENTUM',
+    'CONTEXT_REVERSAL_BONUS',
+    'CONTEXT_WRONG_PENALTY',
     # OB Detector
     'scan_order_blocks',
     'detect_ob_long',

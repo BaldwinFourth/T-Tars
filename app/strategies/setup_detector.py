@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v2.5.1
+T-TARS Setup Detector v2.6.0
 =============================
 Trading setup orchestrator with PDC bias + Fibo zone filtering.
+
+v2.6.0:
+- NEW: Pattern detection bilgisi setup'a ekleniyor
+- NEW: pattern_info field'ı (Grok için detaylı pattern bilgisi)
+- CHANGED: calculate_pdc_bias() artık pattern döndürüyor
+- Detaylı pattern loglama
 
 v2.5.1:
 - CHANGED: FVG zone %50-150 (PDC içi + dışı)
@@ -20,8 +26,6 @@ v2.4.0:
 - NEW: PDC bias belirleme (yeşil=LONG, kırmızı=SHORT)
 - NEW: Fibo zone filtreleme (OB: %70-90, FVG: %100-150)
 - NEW: Doji reversal kontrolü
-- NEW: scan_order_blocks ve scan_fair_value_gaps'a atr/current_price geçiliyor
-- CHANGED: Import'lara calculate_pdc_bias, calculate_fibo_zones, is_in_ob_zone, is_in_fvg_zone eklendi
 
 v2.1.0:
 - TIMEFRAMES Config'den alınıyor
@@ -47,18 +51,62 @@ logger = logging.getLogger(__name__)
 TIMEFRAMES = Config.TIMEFRAMES  # ['4h', '1h', '30m', '15m', '5m']
 
 
+def _format_pattern_for_grok(pattern_result):
+    """
+    Pattern sonucunu Grok için okunabilir formata çevir.
+    
+    Args:
+        pattern_result: detect_candle_patterns() çıktısı
+    
+    Returns:
+        str: Grok prompt'una eklenecek pattern özeti
+    """
+    if not pattern_result or not pattern_result.get('pattern_detected'):
+        return "Pattern tespit edilemedi"
+    
+    lines = []
+    
+    # Ana pattern
+    lines.append(f"Pattern: {pattern_result.get('pattern_name', 'Unknown')}")
+    lines.append(f"Sinyal: {pattern_result.get('signal', 'NEUTRAL')} ({pattern_result.get('signal_strength', 'NONE')})")
+    lines.append(f"Confidence: %{int(pattern_result.get('confidence', 0) * 100)}")
+    lines.append(f"Trend Context: {pattern_result.get('trend_context', 'UNKNOWN')}")
+    
+    if pattern_result.get('is_reversal_position'):
+        lines.append("⚡ Reversal pozisyonunda (doğru konum)")
+    
+    # Momentum
+    momentum = pattern_result.get('momentum', {})
+    if momentum.get('trend') and momentum['trend'] != 'UNKNOWN':
+        lines.append(f"Momentum: {momentum.get('trend', 'STABLE')} | Pressure: {momentum.get('pressure', 'NONE')}")
+    
+    # Tüm tespit edilen pattern'lar
+    all_patterns = pattern_result.get('all_patterns', [])
+    if len(all_patterns) > 1:
+        lines.append(f"Diğer pattern'lar: {', '.join(p['name'] for p in all_patterns[1:3])}")
+    
+    # Bias önerisi
+    if pattern_result.get('bias_suggestion'):
+        lines.append(f"🎯 Pattern Bias Önerisi: {pattern_result['bias_suggestion']}")
+    
+    if pattern_result.get('skip_recommended'):
+        lines.append("⚠️ Belirsizlik yüksek - SKIP öneriliyor")
+    
+    return "\n".join(lines)
+
+
 def detect_trading_setup(pair, market_data):
     """
     Otomatik tarama için - Tek setup döndürür.
     
-    v2.5.1: FVG zone %100-150 extension (PDC dışı)
+    v2.6.0: Pattern detection entegrasyonu
     """
     try:
         if not market_data:
             logger.warning(f"⚠️ {pair}: Market data boş!")
             return False
         
-        # v2.4.0: PDC bazlı bias belirleme
+        # v2.6.0: PDC bazlı bias belirleme (pattern dahil)
         daily_ohlcv = market_data.get('daily_ohlcv', [])
         if daily_ohlcv and len(daily_ohlcv) >= 5:
             pdc_result = calculate_pdc_bias(daily_ohlcv)
@@ -67,9 +115,17 @@ def detect_trading_setup(pair, market_data):
             pdc = pdc_result['pdc']
             doji_warning = pdc_result['doji_warning']
             reversal_mode = pdc_result['reversal_mode']
+            pattern_result = pdc_result.get('pattern')  # v2.6.0: Yeni
             
             # Fibo zone hesapla
             fibo_data = calculate_fibo_zones(pdc, bias)
+            
+            # v2.6.0: Pattern bilgisini logla
+            if pattern_result and pattern_result.get('pattern_detected'):
+                logger.info(f"🕯️ {pair}: Pattern={pattern_result['pattern_name']} | "
+                           f"Signal={pattern_result['signal']} | "
+                           f"Confidence={pattern_result['confidence']:.2f} | "
+                           f"Trend={pattern_result['trend_context']}")
             
             if doji_warning:
                 logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, PDC_is_Doji={pdc_result['pdc_is_doji']}, Reversal={reversal_mode}")
@@ -81,6 +137,7 @@ def detect_trading_setup(pair, market_data):
             fibo_data = None
             doji_warning = False
             reversal_mode = False
+            pattern_result = None
         
         current_price = market_data.get('current_price', 0)
         
@@ -144,6 +201,10 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        result['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        result['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair}: OB LONG setup bulundu!")
                 return result
             elif bias_str == 'bearish' and ob['type'] == 'bearish':
@@ -151,6 +212,10 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        result['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        result['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair}: OB SHORT setup bulundu!")
                 return result
             else:
@@ -166,6 +231,10 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        result['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        result['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair}: FVG LONG setup bulundu!")
                 return result
             elif bias_str == 'bearish' and fvg['type'] == 'bearish':
@@ -173,6 +242,10 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        result['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        result['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair}: FVG SHORT setup bulundu!")
                 return result
             else:
@@ -187,11 +260,11 @@ def detect_trading_setup(pair, market_data):
         return False
 
 
-def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data=None):
+def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data=None, pattern_result=None):
     """
     Belirli bir timeframe için setup kontrol et.
     
-    v2.5.1: FVG zone direction bazlı filtreleme
+    v2.6.0: pattern_result parametresi eklendi
     """
     setups = []
     try:
@@ -219,11 +292,19 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
             if bias_str == 'bullish' and ob['type'] == 'bullish':
                 s = detect_ob_long(ob, volume, atr, timeframe, current_price, pair)
                 if s:
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        s['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        s['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair} [{timeframe}]: OB LONG found!")
                     setups.append(s)
             elif bias_str == 'bearish' and ob['type'] == 'bearish':
                 s = detect_ob_short(ob, volume, atr, timeframe, current_price, pair)
                 if s:
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        s['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        s['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair} [{timeframe}]: OB SHORT found!")
                     setups.append(s)
         
@@ -233,11 +314,19 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
             if bias_str == 'bullish' and fvg['type'] == 'bullish':
                 s = detect_fvg_long(fvg, volume, atr, timeframe, current_price, pair)
                 if s:
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        s['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        s['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair} [{timeframe}]: FVG LONG found!")
                     setups.append(s)
             elif bias_str == 'bearish' and fvg['type'] == 'bearish':
                 s = detect_fvg_short(fvg, volume, atr, timeframe, current_price, pair)
                 if s:
+                    # v2.6.0: Pattern bilgisi ekle
+                    if pattern_result:
+                        s['pattern_info'] = _format_pattern_for_grok(pattern_result)
+                        s['pattern_data'] = pattern_result
                     logger.info(f"✅ {pair} [{timeframe}]: FVG SHORT found!")
                     setups.append(s)
         
@@ -255,14 +344,14 @@ def scan_setups(pair, market_data):
     """
     Tüm timeframe'leri tarayarak setup bul.
     
-    v2.5.1: FVG zone %100-150 extension
+    v2.6.0: Pattern detection entegrasyonu
     """
     try:
         if not market_data:
             logger.warning(f"⚠️ {pair}: scan_setups - Market data boş!")
             return []
         
-        # v2.4.0: PDC bazlı bias belirleme
+        # v2.6.0: PDC bazlı bias belirleme (pattern dahil)
         daily_ohlcv = market_data.get('daily_ohlcv', [])
         if daily_ohlcv and len(daily_ohlcv) >= 5:
             pdc_result = calculate_pdc_bias(daily_ohlcv)
@@ -270,9 +359,16 @@ def scan_setups(pair, market_data):
             pdc = pdc_result['pdc']
             doji_warning = pdc_result['doji_warning']
             reversal_mode = pdc_result['reversal_mode']
+            pattern_result = pdc_result.get('pattern')  # v2.6.0: Yeni
             
             # Fibo zone hesapla
             fibo_data = calculate_fibo_zones(pdc, bias)
+            
+            # v2.6.0: Pattern bilgisini logla
+            if pattern_result and pattern_result.get('pattern_detected'):
+                logger.info(f"🕯️ {pair}: Pattern={pattern_result['pattern_name']} | "
+                           f"Signal={pattern_result['signal']} | "
+                           f"Confidence={pattern_result['confidence']:.2f}")
             
             if doji_warning:
                 logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, PDC_is_Doji={pdc_result['pdc_is_doji']}, Reversal={reversal_mode}")
@@ -283,6 +379,7 @@ def scan_setups(pair, market_data):
             fibo_data = None
             doji_warning = False
             reversal_mode = False
+            pattern_result = None
         
         current_price = market_data.get('current_price', 0)
         
@@ -291,7 +388,8 @@ def scan_setups(pair, market_data):
         all_setups = []
         
         for tf in TIMEFRAMES:
-            s = check_timeframe(pair, market_data, tf, bias, current_price, fibo_data)
+            # v2.6.0: pattern_result'u check_timeframe'e geç
+            s = check_timeframe(pair, market_data, tf, bias, current_price, fibo_data, pattern_result)
             if s:
                 # Doji bilgisini ekle
                 for setup in s:

@@ -1,4 +1,88 @@
-# T-TARS Changelog v2.5.9
+# T-TARS Changelog
+
+## v2.6.0 (2026-01-08)
+
+### ✨ NEW: Kapsamlı Candle Pattern Detection Sistemi
+
+**Yeni Pattern'lar:**
+- **Doji Ailesi:** Standard, Gravestone (bearish), Dragonfly (bullish), Long-legged
+- **Hammer/Star Ailesi:** Hammer, Inverted Hammer, Shooting Star, Hanging Man
+- **Engulfing:** Bullish Engulfing, Bearish Engulfing (Perfect/Body)
+- **Piercing/Dark Cloud:** Piercing Line, Dark Cloud Cover
+- **3 Mum Pattern'lar:** Morning Star, Evening Star (Doji varyantları dahil)
+- **3 Soldiers/Crows:** Three White Soldiers, Three Black Crows
+- **Momentum Analizi:** Shrinking/Growing body tespiti
+- **Liquidity Sweep:** High/Low sweep tespiti
+
+**Yeni Fonksiyonlar (calculators.py):**
+- `detect_candle_patterns()` - Ana pattern tespit fonksiyonu
+- `_get_candle_metrics()` - Mum metrik hesaplama
+- `_determine_trend_context()` - Trend context analizi (son 5 mum)
+- `_detect_doji_type()` - Doji tipini tespit
+- `_detect_hammer_star()` - Hammer/Star ailesi
+- `_detect_engulfing()` - Engulfing pattern
+- `_detect_piercing_darkcloud()` - Piercing/Dark Cloud
+- `_detect_morning_evening_star()` - Morning/Evening Star
+- `_detect_three_soldiers_crows()` - Three Soldiers/Crows
+- `_analyze_momentum()` - Momentum analizi
+- `_detect_liquidity_sweep()` - Sweep tespiti
+
+**Grok Entegrasyonu:**
+- Pattern bilgisi setup_data'ya `pattern_info` ve `pattern_data` olarak ekleniyor
+- Grok prompt'una "CANDLE PATTERN ANALİZİ" bölümü eklendi
+- System prompt'a pattern değerlendirme kuralları eklendi
+- Pattern `skip_recommended=True` ise otomatik SKIP
+
+**Threshold Sabitleri (Yeni):**
+- `DOJI_SHADOW_RATIO = 2.0`
+- `HAMMER_SHADOW_RATIO = 2.0`
+- `ENGULF_MIN_RATIO = 1.0`
+- `MOMENTUM_SHRINK_RATIO = 0.7`
+- `MOMENTUM_GROW_RATIO = 1.3`
+- `TREND_LOOKBACK = 5`
+- `CONFIDENCE_3_CANDLE = 0.95`
+- `CONFIDENCE_2_CANDLE = 0.85`
+- `CONFIDENCE_1_CANDLE = 0.70`
+
+### 📝 Değişiklikler
+
+**calculators.py:**
+- `calculate_pdc_bias()` artık `detect_candle_patterns()` çağırıyor
+- Pattern confidence >= 0.75 ise bias override yapılıyor
+- Return'e `pattern` field'ı eklendi
+
+**setup_detector.py:**
+- `_format_pattern_for_grok()` fonksiyonu eklendi
+- Setup'lara `pattern_info` ve `pattern_data` ekleniyor
+- `check_timeframe()` artık `pattern_result` parametresi alıyor
+
+**grok_service.py:**
+- System prompt'a pattern açıklamaları eklendi
+- Prompt'a "CANDLE PATTERN ANALİZİ" bölümü eklendi
+- Pattern `skip_recommended` kontrolü eklendi
+- Log'lara pattern tag'ı eklendi `[PAT:...]`
+
+**strategies/__init__.py:**
+- `detect_candle_patterns` export eklendi
+- Pattern threshold sabitleri export eklendi
+
+### 📊 Pattern Öncelik Sırası
+
+1. Morning/Evening Star (3 mum, en güvenilir)
+2. Engulfing (2 mum, güçlü)
+3. Liquidity Sweep (market structure)
+4. Hammer/Shooting Star (1 mum + konum)
+5. Doji Tipleri (1 mum + konum)
+6. Momentum (uyarı amaçlı)
+
+### 🔧 Teknik Detaylar
+
+- Trend context: Son 5 mum analiz ediliyor
+- Konum bonusu: Doğru konumda 1.2x confidence
+- Konum cezası: Yanlış konumda 0.5x confidence
+- Momentum: Body size değişimi %70/%130 threshold
+
+---
 
 ## v2.5.9 (2026-01-08)
 

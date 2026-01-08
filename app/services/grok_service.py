@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Grok Service v2.5.9
+T-TARS Grok Service v2.6.0
 ==============================
 Grok API wrapper for market analysis and setup evaluation.
+
+v2.6.0:
+- NEW: Candle Pattern bilgisi prompt'a eklendi
+- NEW: Pattern bazlı SKIP önerisi desteği
+- CHANGED: System prompt'a pattern açıklamaları eklendi
 
 v2.5.9:
 - CHANGED: JSON parse failed → artık SKIP döndürüyor (ENTER/SKIP tahmin etmiyor)
@@ -58,14 +63,34 @@ SYSTEM_PROMPT = """Sen T-TARS, profesyonel bir ICT/SMC (Inner Circle Trader / Sm
 3. OB/FVG tepki kalitesini analiz et
 4. Confluence (birleşim) noktalarını tespit et
 5. Risk/Reward oranını değerlendir
+6. **Candle Pattern'ları değerlendir (Doji, Engulfing, Star, Hammer, Sweep)**
+
+## CANDLE PATTERN DEĞERLENDİRMESİ:
+- **Morning/Evening Star**: 3 mum pattern, çok güçlü reversal (Confidence >= 0.90)
+- **Bullish/Bearish Engulfing**: 2 mum pattern, güçlü reversal (Confidence >= 0.80)
+- **Hammer/Shooting Star**: Tek mum, konum önemli (Downtrend sonunda Hammer = Bullish)
+- **Doji Tipleri**: 
+  - Gravestone Doji (üst gölge uzun) = Bearish
+  - Dragonfly Doji (alt gölge uzun) = Bullish  
+  - Standard/Long-legged = Kararsızlık, dikkatli ol
+- **Liquidity Sweep**: Önceki high/low kırılıp geri dönüş = Güçlü reversal sinyali
+- **Momentum**: Shrinking bodies = Momentum kaybı, reversal yakın olabilir
+
+## PATTERN + KONUM KURALLARI:
+- Reversal pattern DOWNTREND sonunda = BULLISH setup için güçlü onay
+- Reversal pattern UPTREND sonunda = BEARISH setup için güçlü onay
+- Reversal pattern trend ortasında = ZAYIF sinyal, dikkatli ol
+- Pattern confidence < 0.60 = Pattern'ı göz ardı et
 
 ## KARAR PRENSİPLERİN:
-- ENTER: Minimum 4/5 kriter pozitif, güçlü confluence var
-- SKIP: 2+ kriter negatif veya belirsizlik var
+- ENTER: Minimum 4/5 kriter pozitif, güçlü confluence var, pattern destekliyor
+- SKIP: 2+ kriter negatif VEYA pattern ters sinyal veriyor VEYA belirsizlik var
 - WAIT: Daha fazla konfirmasyon gerekiyor
 
 ## ÖNEMLİ KURALLAR:
 - Sadece güçlü setup'lara ENTER ver
+- Pattern "skip_recommended: true" ise SKIP ver
+- Pattern sinyali setup yönüyle çelişiyorsa DİKKATLİ OL
 - Emin değilsen SKIP (para kaybetmemek kazanmaktan önemli)
 - Duygusal değil, teknik analiz odaklı ol
 - Her zaman JSON formatında cevap ver
@@ -89,7 +114,7 @@ def format_price_display(price):
 
 
 class GrokService:
-    """Grok 4.1 Fast Reasoning API Service - v2.5.8 (AI Decision Engine + %1.0 Stop)"""
+    """Grok 4.1 Fast Reasoning API Service - v2.6.0 (AI Decision Engine + Pattern Detection)"""
     
     # Timeframe mapping: Türkçe → API format
     TF_MAP = {
@@ -124,7 +149,7 @@ class GrokService:
         # v2.4.14: Thinking budget (Grok reasoning için)
         self.thinking_budget = Config.THINKING_BUDGET
         
-        logger.info(f"✅ Grok Service v2.5.8 initialized: {Config.GROK_MODEL} | "
+        logger.info(f"✅ Grok Service v2.6.0 initialized: {Config.GROK_MODEL} | "
                    f"Thinking: {self.thinking_budget} tokens | "
                    f"Stop: {self.STOP_MIN_PCT}%-{self.STOP_ADJUST_MAX}% | "
                    f"MIN_RR: {MIN_RR_RATIO} | TP_MULT: {TP_MULTIPLIER}")
@@ -337,7 +362,7 @@ class GrokService:
     
     def evaluate_setup(self, setup_data, market_data, python_score):
         """
-        v2.5.8: AI Setup Değerlendirmesi - Claude v2.5.2 mantığı + Grok API
+        v2.6.0: AI Setup Değerlendirmesi - Pattern Detection entegrasyonu
         """
         pair = setup_data.get('pair', 'UNKNOWN')
         direction = setup_data.get('direction', 'UNKNOWN')
@@ -398,6 +423,15 @@ class GrokService:
             if strength_score is not None:
                 strength_score = float(strength_score)
             
+            # v2.6.0: Pattern bilgisi
+            pattern_info = setup_data.get('pattern_info', '')
+            pattern_data = setup_data.get('pattern_data', {})
+            
+            # Pattern skip önerisi kontrolü
+            if pattern_data and pattern_data.get('skip_recommended'):
+                logger.info(f"⏭️ Pre-filter SKIP [{pair}]: Pattern belirsizliği yüksek - skip_recommended=True")
+                return self._skip_response(f"{pair}: Pattern belirsizlik - skip önerildi")
+            
             # MARKET VERİLERİ
             current_price = market_data.get('current_price')
             if current_price is None or current_price == 0:
@@ -415,6 +449,12 @@ class GrokService:
             logger.info(f"📊 [{pair}] {direction} Pre-filter başlıyor:")
             logger.info(f"   Entry: {format_price_display(entry_price)} | Stop: {format_price_display(stop_price)} | TP: {format_price_display(tp_price)}")
             logger.info(f"   Price: {format_price_display(current_price)}")
+            
+            # v2.6.0: Pattern bilgisini logla
+            if pattern_data and pattern_data.get('pattern_detected'):
+                logger.info(f"🕯️ [{pair}] Pattern: {pattern_data.get('pattern_name')} | "
+                           f"Signal: {pattern_data.get('signal')} ({pattern_data.get('signal_strength')}) | "
+                           f"Confidence: {pattern_data.get('confidence', 0):.2f}")
             
             # YÖN KONTROLÜ - LONG: stop < entry < price
             if is_long:
@@ -560,6 +600,14 @@ class GrokService:
 - R:R: {adjustment_result['original_rr']:.2f} → {adjustment_result['new_rr']:.2f}
 """
             
+            # v2.6.0: Pattern bilgisi prompt'a ekleniyor
+            pattern_section = ""
+            if pattern_info:
+                pattern_section = f"""
+## 🕯️ CANDLE PATTERN ANALİZİ:
+{pattern_info}
+"""
+            
             prompt = f"""Aşağıdaki setup'ı değerlendir:
 
 ## SETUP BİLGİLERİ:
@@ -571,7 +619,7 @@ class GrokService:
 - Stop Loss: {format_price_display(stop_price)} (mesafe: %{stop_distance_pct:.2f})
 - TP: {format_price_display(tp_price)}
 - R:R Ratio: {rr_ratio:.2f}
-{score_info}{adjustment_info}
+{score_info}{adjustment_info}{pattern_section}
 ## MARKET VERİSİ:
 - Price: {format_price_display(current_price)}
 - PDC Bias: {pdc_bias.upper() if pdc_bias else 'UNKNOWN'}
@@ -598,12 +646,14 @@ class GrokService:
    
 2. REVERSAL SİNYALİ:
    - OB/FVG'den tepki var mı?
+   - **PATTERN KONTROLÜ: Candle pattern {direction} yönünü destekliyor mu?**
    
 3. CONFLUENCE:
    - Entry bölgesinde OB + FVG + Fibo birleşimi var mı?
    
 4. BIAS UYUMU:
    - {direction} yönü PDC bias ({pdc_bias if pdc_bias else 'unknown'}) ile uyumlu mu?
+   - **Pattern bias önerisi setup yönüyle uyumlu mu?**
 
 5. SETUP GÜCÜ:
    - Volume spike: {volume_spike:.2f}x (>{VOLUME_LOW} kabul, >{VOLUME_GOOD} iyi, >{VOLUME_EXCELLENT} cok iyi)
@@ -661,12 +711,12 @@ SADECE JSON formatında cevap ver:
                 'output_tokens': response.usage.completion_tokens
             }
             
-            # Log - v2.5.8: tokens kaldırıldı
+            # Log
             emoji = "✅" if action == "ENTER" else "⏭️" if action == "SKIP" else "⏸️"
             adj_tag = f" [ADJ:{adjustment_result['adjustment_type']}]" if adjustment_result['adjusted'] else ""
-            logger.info(f"🧠 Grok [{pair}] {direction} [{timeframe}]{adj_tag} → {emoji} {action} ({result['confidence']}%) | {result['reasoning'][:50]}...")
+            pattern_tag = f" [PAT:{pattern_data.get('pattern_name', 'None')[:15]}]" if pattern_data and pattern_data.get('pattern_detected') else ""
+            logger.info(f"🧠 Grok [{pair}] {direction} [{timeframe}]{adj_tag}{pattern_tag} → {emoji} {action} ({result['confidence']}%) | {result['reasoning'][:50]}...")
             
-            # v2.5.8: tokens logu kaldırıldı
             logger.info(f"🎯 evaluate_setup() EXIT | {pair} → {action}")
             return result
             

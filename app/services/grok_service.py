@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Grok Service v2.5.8
+T-TARS Grok Service v2.5.9
 ==============================
 Grok API wrapper for market analysis and setup evaluation.
+
+v2.5.9:
+- CHANGED: JSON parse failed → artık SKIP döndürüyor (ENTER/SKIP tahmin etmiyor)
+- Güvenilir olmayan response'larda trade açılmıyor
 
 v2.5.8:
 - REMOVED: tokens logu evaluate_setup EXIT'den kaldırıldı (gereksiz)
@@ -634,12 +638,7 @@ SADECE JSON formatında cevap ver:
                     decision = json.loads(text_content)
             except json.JSONDecodeError as e:
                 logger.warning(f"⚠️ [{pair}]: JSON parse failed: {e} | Response: {text_content[:100]}")
-                if 'ENTER' in text_content.upper():
-                    decision = {'action': 'ENTER', 'confidence': 50, 'reasoning': 'JSON parse failed, ENTER detected'}
-                elif 'SKIP' in text_content.upper():
-                    decision = {'action': 'SKIP', 'confidence': 50, 'reasoning': 'JSON parse failed, SKIP detected'}
-                else:
-                    decision = {'action': 'WAIT', 'confidence': 30, 'reasoning': 'JSON parse failed, defaulting to WAIT'}
+                decision = {'action': 'SKIP', 'confidence': 0, 'reasoning': 'JSON parse failed - unreliable response'}
             
             # Normalize action
             action = decision.get('action', 'WAIT').upper()

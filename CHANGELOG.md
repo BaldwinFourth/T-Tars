@@ -7,6 +7,11 @@
 - **ADDED:** PEPE, LINK, ZEC eklendi
 - Toplam: 14 coin (sayı aynı)
 
+### 🛡️ JSON Parse Güvenlik Fix
+- JSON parse failed durumunda artık SKIP döndürüyor
+- Eskiden ENTER/SKIP kelimesi aranıyordu (riskli)
+- Güvenilir olmayan response'larda trade açılmıyor
+
 ### 🗑️ GCS Auto-Cleanup (v2.5.8'den)
 - Günde 1 kez otomatik eski setup temizliği
 - 4+ gün eski EXPIRED/CLOSED/CANCELLED → siliniyor
@@ -19,9 +24,7 @@
 
 ### 📁 Değişen Dosyalar
 - `config.py` - AUTO_SCAN_PAIRS güncellendi
-- `main.py` - GCS cleanup entegrasyonu
-- `tracking_service.py` - cleanup_old_setups() fonksiyonu
-- `grok_service.py` - tokens log kaldırıldı
+- `grok_service.py` - JSON parse failed → SKIP
 
 ### ⚠️ TradingView Gereksinimleri
 - PineScript v15 1h Scanner - yeni indicator ekle

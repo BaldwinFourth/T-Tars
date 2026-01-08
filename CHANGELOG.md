@@ -1,5 +1,25 @@
 # T-TARS Changelog
 
+## v2.6.1 (2026-01-08)
+
+### 🐛 Bug Fix
+
+**Momentum Body Sizes:**
+- `_analyze_momentum()` artık `body` yerine `body_ratio * 100` kullanıyor
+- Küçük fiyatlı coinlerde (PEPE, DOGE, TRX) 0.0 sorunu çözüldü
+- Universal hesaplama - fiyattan bağımsız
+
+**Örnek:**
+```
+# ESKİ (v2.6.0):
+📊 Momentum: SHRINKING | Bodies: [0.0, 0.0, 0.0, 0.0]  ❌
+
+# YENİ (v2.6.1):
+📊 Momentum: SHRINKING | Bodies: [12.5, 8.3, 5.1, 2.8]  ✅
+```
+
+---
+
 ## v2.6.0 (2026-01-08)
 
 ### ✨ NEW: Kapsamlı Candle Pattern Detection Sistemi

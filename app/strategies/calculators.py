@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.6.0
+T-TARS Trading Calculators v2.6.1
 ===================================
+v2.6.1:
+- FIX: Momentum body_sizes artık body_ratio kullanıyor (universal, fiyattan bağımsız)
+- FIX: Küçük fiyatlı coinlerde (PEPE, DOGE) 0.0 sorunu çözüldü
+
 v2.6.0:
 - NEW: Kapsamlı Candle Pattern Detection sistemi
 - NEW: detect_candle_patterns() - Ana pattern tespit fonksiyonu
@@ -770,7 +774,7 @@ def _analyze_momentum(candles):
     for c in candles[-4:]:
         metrics = _get_candle_metrics(c)
         if metrics:
-            body_sizes.append(round(metrics['body'], 2))
+            body_sizes.append(round(metrics['body_ratio'] * 100, 1))  # % olarak
             upper_shadows.append(metrics['upper_shadow'])
             lower_shadows.append(metrics['lower_shadow'])
     

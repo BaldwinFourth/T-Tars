@@ -1,26 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.5.8
+T-TARS Trading Bot v2.7.0
 ===========================
 Main Flask application with routes.
 
-v2.5.8:
-- NEW: cleanup_old_setups() - Eski GCS kayıtlarını otomatik temizle
-  - 4+ gün eski EXPIRED/CLOSED/CANCELLED → SİL
-  - 4+ gün eski stale PENDING (tracking_no=null) → SİL
+v2.7.0:
+- REMOVED: /plan, /scan, /execute, /log komutları
+- NEW: Trade notification'larına pattern bilgisi eklendi
+- CLEANUP: Kullanılmayan import'lar kaldırıldı
 
-v2.5.4:
-- CHANGED: claude_decision → ai_decision (parametre adı tutarlılığı)
-- CHANGED: Tüm Claude referansları Grok olarak güncellendi
+v2.6.1:
+- FIX: Momentum body_sizes artık body_ratio kullanıyor
 
-v2.5.3:
-- CHANGED: Claude → Grok 4.1 Fast Reasoning geçişi
-- CHANGED: ClaudeService → GrokService
-- AI engine artık xAI Grok kullanıyor
-
-v2.4.10:
-- CHANGED: TP1/TP2 → Tek TP sistemi (3.0 ATR)
-- CHANGED: MIN_RR_RATIO = 3.0 (eskiden 2.0)
+v2.6.0:
+- NEW: Kapsamlı Candle Pattern Detection sistemi
 """
 
 from flask import Flask, request, jsonify
@@ -42,11 +35,7 @@ from app.strategies.volume_analyzer import (
 from app.handlers.telegram_handlers import (
     init_handlers,
     get_turkey_time,
-    handle_plan_command,
-    handle_execute_command,
-    handle_log_command,
     handle_status_command,
-    handle_scan_command,
     handle_score_command,
     handle_reset_score_command,
     handle_help_command,
@@ -73,15 +62,13 @@ logger = logging.getLogger(__name__)
 # SCAN LOCK
 SCAN_LOCK = threading.Lock()
 
-# ============================================
-# v2.3.8: MARKET CACHE (TradingView'dan Volume + ATR)
-# ============================================
+# MARKET CACHE (TradingView'dan Volume + ATR)
 MARKET_CACHE = {}
 
 # Turkey timezone
 TURKEY_TZ = timezone(timedelta(hours=3))
 
-# v2.5.8: Son cleanup zamanı (günde 1 kez)
+# Son cleanup zamanı (günde 1 kez)
 LAST_CLEANUP_DATE = None
 
 
@@ -109,13 +96,12 @@ app = Flask(__name__)
 # ============================================
 try:
     Config.validate()
-    grok = GrokService()  # v2.5.3: Claude → Grok
+    grok = GrokService()
     telegram = TelegramService()
     storage = StorageService()
     bitget = BitgetService()
     tracking = TrackingService()
     
-    # v2.5.3: grok (eski adı claude) - backward compat için aynı parametre adı
     init_handlers(telegram, bitget, grok, storage, tracking, market_cache=MARKET_CACHE)
     
     logger.info(f"✅ All services initialized (v{Config.VERSION})")
@@ -136,7 +122,7 @@ def index():
         "version": Config.VERSION,
         "status": "running",
         "exchange": "Bitget",
-        "ai_engine": "Grok 4.1 Fast Reasoning",  # v2.5.3
+        "ai_engine": "Grok 4.1 Fast Reasoning",
         "market_source": "TradingView (Binance) - Volume + ATR",
         "lock_status": "locked" if SCAN_LOCK.locked() else "free",
         "market_cache_size": len(MARKET_CACHE),
@@ -277,18 +263,9 @@ def telegram_webhook():
         command = text.split()[0].split('@')[0].lower()
         logger.info(f"📱 CMD: {command}")
         
-        if command == '/plan':
-            handle_plan_command(text, chat_id)
-        elif command == '/execute':
-            handle_execute_command(text, chat_id)
-        elif command == '/log':
-            handle_log_command(text, chat_id)
-        elif command == '/status':
+        # v2.7.0: Sadeleştirilmiş komutlar
+        if command == '/status':
             handle_status_command(chat_id)
-        elif command == '/scan':
-            if SCAN_LOCK.locked():
-                telegram.send("⚠️ Otomatik tarama sürüyor, performans düşebilir.", chat_id=chat_id)
-            handle_scan_command(chat_id)
         elif command == '/reset_score':
             handle_reset_score_command(chat_id)
         elif command == '/score':
@@ -319,13 +296,13 @@ def telegram_webhook():
                 f"MARKET_CACHE: {cache_count}\n"
                 f"Taze (<{Config.MARKET_CACHE_TTL//60}dk): {fresh_count}\n"
                 f"ATR mevcut: {atr_count}\n\n"
-                f"*Volume Store (v2.3.7)*\n"
+                f"*Volume Store*\n"
                 f"Toplam: {vol_stats.get('total', 0)}\n"
                 f"Pair'ler: {', '.join(vol_stats.get('pairs', []))}", 
                 chat_id=chat_id
             )
         else:
-            telegram.send("❌ Bilinmeyen komut.", chat_id=chat_id)
+            telegram.send("❌ Bilinmeyen komut. /help yazın.", chat_id=chat_id)
         
         return jsonify({"status": "success"})
         
@@ -340,9 +317,7 @@ def telegram_webhook():
 
 @app.route('/monitor', methods=['POST', 'GET'])
 def monitor_setups():
-    """
-    v2.3.11: Bitget Bazlı Monitor + TF Bazlı Order Expiry
-    """
+    """Bitget Bazlı Monitor + TF Bazlı Order Expiry"""
     try:
         if not is_trading_enabled():
             return jsonify({"status": "skipped", "reason": "trading_disabled"}), 200
@@ -416,25 +391,34 @@ def monitor_setups():
                                 'close_price': close_price
                             })
                             
-                            result_emoji = "🟢" if trade_result == 'WIN' else "🔴" if trade_result == 'LOSS' else "⚪"
+                            # v2.7.0: Pozisyon kapanış mesajı (TP/SL bilgisi)
+                            if trade_result == 'WIN':
+                                result_emoji = "✅"
+                                header = "TP - POZİSYON KAPANDI"
+                            elif trade_result == 'LOSS':
+                                result_emoji = "❌"
+                                header = "SL - POZİSYON KAPANDI"
+                            else:
+                                result_emoji = "⚪"
+                                header = "POZİSYON KAPANDI"
+                            
                             pnl_sign = "+" if pnl >= 0 else ""
-                            dir_emoji = "📈" if direction == "LONG" else "📉"
+                            dir_emoji = "🟢" if direction == "LONG" else "🔴"
                             
                             close_msg = f"""
 ━━━━━━━━━━━
-{result_emoji} *POZİSYON KAPANDI*
+{result_emoji} *{header}*
 ━━━━━━━━━━━
 
 {dir_emoji} *{coin_name}* | {direction}
-💵 Giriş: {format_price(entry_price)}
-💰 Çıkış: {format_price(close_price)}
+💵 Entry: {format_price(entry_price)}
+💰 Exit: {format_price(close_price)}
 
-{result_emoji} *Sonuç: {trade_result}*
-💲 P/L: {pnl_sign}${pnl:.2f}
+{result_emoji} *P/L: {pnl_sign}${pnl:.2f}*
+🔢 Tracking: `{setup_tracking_no}`
 
 ━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━
 """
                             telegram.send(close_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                         else:
@@ -463,9 +447,7 @@ def monitor_setups():
 
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
-    """
-    v2.5.8: Grok 4.1 Fast Reasoning ile Otomatik Tarama + GCS Cleanup
-    """
+    """Grok 4.1 Fast Reasoning ile Otomatik Tarama + Pattern Detection"""
     global LAST_CLEANUP_DATE
     
     interval = Config.MONITOR_INTERVAL_MINUTES
@@ -487,7 +469,7 @@ def auto_analyze():
         try:
             logger.info(f"🔄 Auto analyze started (v{Config.VERSION})")
             
-            # v2.5.8: Günde 1 kez GCS cleanup
+            # Günde 1 kez GCS cleanup
             today = datetime.now(TURKEY_TZ).date()
             cleanup_result = None
             if LAST_CLEANUP_DATE != today:
@@ -523,7 +505,7 @@ def auto_analyze():
             pairs = Config.AUTO_SCAN_PAIRS
             total_setups = 0
             orders_placed = 0
-            grok_skips = 0  # v2.5.3: claude_skips → grok_skips
+            grok_skips = 0
             cache_hits = 0
             cache_misses = 0
             
@@ -561,9 +543,17 @@ def auto_analyze():
                         
                         direction = setup.get('direction', 'LONG')
                         timeframe = setup.get('timeframe', 'N/A')
-                        logger.info(f"🧠 Grok değerlendiriyor: {pair} {direction} [{timeframe}]")
                         
-                        # v2.5.3: grok.evaluate_setup
+                        # v2.7.0: Pattern bilgisini logla
+                        pattern_data = setup.get('pattern_data', {})
+                        pattern_name = pattern_data.get('pattern_name', 'None')
+                        pattern_conf = pattern_data.get('confidence', 0)
+                        
+                        if pattern_name and pattern_name != 'None':
+                            logger.info(f"🧠 Grok değerlendiriyor: {pair} {direction} [{timeframe}] [PAT:{pattern_name}]")
+                        else:
+                            logger.info(f"🧠 Grok değerlendiriyor: {pair} {direction} [{timeframe}]")
+                        
                         decision = grok.evaluate_setup(
                             setup_data=setup,
                             market_data=market_data,
@@ -663,12 +653,14 @@ def auto_analyze():
                                     'contracts': exec_result.get('contracts', 0),
                                     'position_usd': exec_result.get('position_usd', 0),
                                     'status': 'FILLED',
-                                    'ai_action': action,  # v2.5.3: claude_action → ai_action
+                                    'ai_action': action,
                                     'ai_confidence': confidence,
                                     'ai_reasoning': reasoning,
                                     'python_score': python_score,
                                     'stop_adjusted': adjustments.get('adjusted', False),
                                     'adjustment_type': adjustments.get('type'),
+                                    'pattern_name': pattern_name,
+                                    'pattern_confidence': pattern_conf,
                                 }
                                 
                                 setup_id = tracking.log_setup(setup_data)
@@ -678,13 +670,18 @@ def auto_analyze():
                                     
                                     dir_emoji = "🟢" if direction == "LONG" else "🔴"
                                     
+                                    # v2.7.0: Pattern bilgisi notification'a eklendi
+                                    pattern_info = ""
+                                    if pattern_name and pattern_name != 'None' and pattern_conf > 0:
+                                        pattern_info = f"\n🕯️ Pattern: {pattern_name} ({int(pattern_conf*100)}%)"
+                                    
                                     adj_info = ""
                                     if adjustments.get('adjusted'):
                                         adj_info = f"\n⚙️ Stop Adj: {adjustments.get('type', 'N/A')}"
                                     
                                     if is_replace:
                                         header = "🔄 *EMİR GÜNCELLENDİ*"
-                                        replace_info = f"\n🗑️ Eski Order: `{old_order_id_cancelled}`\n📝 {replace_reason}"
+                                        replace_info = f"\n🗑️ Eski: `{old_order_id_cancelled}`\n📝 {replace_reason}"
                                     else:
                                         header = f"{dir_emoji} *YENİ EMİR AÇILDI*"
                                         replace_info = ""
@@ -697,20 +694,18 @@ def auto_analyze():
 📊 *{coin_name}* | {direction} | {timeframe}
 💵 Entry: {format_price(setup.get('entry_price', 0))}
 🛑 SL: {format_price(exec_result.get('stop_price', 0))}
-✅ TP: {format_price(exec_result.get('tp_price', 0))}{adj_info}
+✅ TP: {format_price(exec_result.get('tp_price', 0))}{adj_info}{pattern_info}
 
 📦 Kontrat: {exec_result.get('contracts', 'N/A')}
 💰 Pozisyon: ${exec_result.get('position_usd', 0):.2f}
-🆔 Order: `{exec_result.get('order_id', 'N/A')}`
+🔢 Order: `{exec_result.get('order_id', 'N/A')}`
 
 🧠 *Grok AI*
 • Karar: {action} ({confidence}%)
-• Sebep: {reasoning[:50]}...
-• Python Score: {python_score*100:.0f}/100
+• Python: {python_score*100:.0f}/100
 
 ━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%H:%M:%S')} TR
-━━━━━━━━━━━
 """
                                     telegram.send(notify_msg, chat_id=Config.TELEGRAM_CHAT_ID)
                             else:
@@ -728,7 +723,7 @@ def auto_analyze():
             response = {
                 "status": "success",
                 "orders": orders_placed,
-                "grok_skips": grok_skips,  # v2.5.3
+                "grok_skips": grok_skips,
                 "setups_logged": total_setups,
                 "volume_cache_hits": cache_hits,
                 "volume_cache_misses": cache_misses,

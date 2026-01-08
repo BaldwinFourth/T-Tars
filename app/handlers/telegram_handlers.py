@@ -1,36 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Telegram Handlers v2.5.4
+T-TARS Telegram Handlers v2.7.0
 =================================
 Telegram bot komut handler'ları.
+
+v2.7.0:
+- REMOVED: /plan, /scan, /execute, /log komutları kaldırıldı
+- UPDATED: /help menüsü sadeleştirildi
+- CLEANUP: Kullanılmayan fonksiyonlar temizlendi
 
 v2.5.4:
 - CHANGED: _claude → _grok (global değişken)
 - CHANGED: Claude AI referansları → Grok AI
-- CHANGED: Status mesajlarında AI engine güncellendi
-
-v2.4.11:
-- NEW: /score'da En Kötü/En İyi coin gösterimi
-- NEW: Coin bazlı PnL breakdown (son 30 gün)
-
-v2.4.10:
-- CHANGED: /plan komutunda TP1/TP2 → tek TP gösterimi
-- UPDATED: Tek TP sistemi (R:R 3.0)
-
-v2.4.6:
-- NEW: /score'da Günlük PnL eklendi
-- CHANGED: history-position endpoint'inden gerçek PnL gösteriliyor
-
-v2.4.5:
-- CHANGED: /score artık Bitget API'den çekiyor (GCS tracking yerine)
-- NEW: get_trade_history_stats() kullanılıyor
 """
 
 import logging
 import threading
 from datetime import datetime, timezone, timedelta
 from app.config import Config
-from app.strategies.setup_detector import detect_all_trading_setups
 
 logger = logging.getLogger(__name__)
 TURKEY_TZ = timezone(timedelta(hours=3))
@@ -64,323 +51,38 @@ def format_price(price):
 # --------------------------
 _telegram = None
 _exchange = None
-_grok = None  # v2.5.4: _claude → _grok
+_grok = None
 _storage = None
 _tracking = None
 _trading_enabled = True
-_market_cache = None  # v2.4.4: Market cache referansı
+_market_cache = None
 
 
 def init_handlers(telegram, exchange, grok, storage, tracking, market_cache=None):
-    """
-    v2.5.4: claude parametre → grok
-    v2.4.4: market_cache parametresi eklendi
-    """
+    """Handler'ları başlat"""
     global _telegram, _exchange, _grok, _storage, _tracking, _trading_enabled, _market_cache
     _telegram = telegram
     _exchange = exchange
-    _grok = grok  # v2.5.4: _claude → _grok
+    _grok = grok
     _storage = storage
     _tracking = tracking
-    _market_cache = market_cache  # v2.4.4
+    _market_cache = market_cache
     _trading_enabled = getattr(Config, 'BITGET_TRADING_ENABLED', True)
-    logger.info(f"✅ Telegram handlers initialized (v2.5.4) - Trading: {_trading_enabled}, Cache: {'Yes' if market_cache else 'No'}")
+    logger.info(f"✅ Telegram handlers initialized (v2.7.0) - Trading: {_trading_enabled}")
 
 
 # --------------------------
-# BEST TF SEÇİCİ
+# İSTATİSTİK KOMUTLARI
 # --------------------------
-def select_best_timeframe_for_plan(setups):
-    if not setups:
-        return None
-    
-    tf_scores = {'1G': 6, '4S': 5, '1S': 4, '15D': 3, '10D': 2.5, '5D': 2, '3D': 1}
-    
-    best_setup = None
-    max_score = -1
-    
-    for setup in setups:
-        tf = setup.get('timeframe', '5D')
-        tf_score = tf_scores.get(tf, 0)
-        conf = setup.get('confidence', 'LOW')
-        conf_score = 2 if conf == 'HIGH' else 1
-        rr = setup.get('rr_ratio', 0)
-        total_score = (tf_score * 1.5) + (conf_score * 2) + rr
-        
-        if total_score > max_score:
-            max_score = total_score
-            best_setup = setup
-            
-    return best_setup
-
-
-# --------------------------
-# AI & ANALİZ KOMUTLARI
-# --------------------------
-
-def handle_plan_command(text, chat_id):
-    """/plan [parite] - Detaylı Akıllı Plan"""
-    def run_plan():
-        try:
-            parts = text.split()
-            user_input = parts[1] if len(parts) > 1 else "BTCUSDT"
-            ticker = Config.get_pair_symbol(user_input)
-            coin_name = ticker.replace('/', '').replace(':USDT', '')
-            
-            _telegram.send(f"🔄 *{coin_name} taranıyor...*\n⏳ Tüm timeframe'ler analiz ediliyor...", chat_id=chat_id)
-            
-            # v2.4.4: market_cache kullan
-            market_data = _exchange.get_complete_analysis_data(ticker, market_cache=_market_cache)
-            if not market_data:
-                _telegram.send("❌ Market verisi alınamadı.", chat_id=chat_id)
-                return
-
-            all_setups = detect_all_trading_setups(ticker, market_data)
-            best_setup = select_best_timeframe_for_plan(all_setups)
-            
-            # Previous Day Candle bilgisi
-            pdc = market_data.get('previous_day', {})
-            bias = pdc.get('candle_type', 'unknown')
-            bias_emoji = "🟢 BULLISH" if bias == 'green' else "🔴 BEARISH"
-            pdc_high = pdc.get('high', 0)
-            pdc_low = pdc.get('low', 0)
-            pdc_open = pdc.get('open', 0)
-            pdc_close = pdc.get('close', 0)
-            
-            # Fibo seviyeleri
-            fibo = market_data.get('fibonacci', {}).get('levels', {})
-            current_price = market_data.get('current_price', 0)
-            
-            # ATR bilgileri
-            atr_data = market_data.get('atr', {})
-            
-            if best_setup:
-                tf = best_setup['timeframe']
-                direction = best_setup['direction']
-                conf = best_setup['confidence']
-                entry = best_setup.get('entry_zone', 'N/A')
-                stop = best_setup.get('stop_loss', 'N/A')
-                tp = best_setup.get('tp', 'N/A')  # v2.4.10: tek TP
-                rr = best_setup.get('rr_ratio', 0)
-                setup_type = best_setup.get('type', 'Unknown')
-                
-                atr_val = atr_data.get(tf, 0)
-                vol = market_data.get('volume', {}).get(tf, {})
-                vol_ratio = vol.get('spike_ratio', 0) if isinstance(vol, dict) else 0
-                
-                dir_emoji = "🟢" if direction == "LONG" else "🔴"
-                conf_emoji = "🔥" if conf == "HIGH" else "⚡" if conf == "MEDIUM" else "💡"
-                
-                plan_msg = f"""
-━━━━━━━━━━━
-🎯 *T-TARS AKILLI PLAN*
-━━━━━━━━━━━
-
-📊 *{coin_name}* | {tf} | {bias_emoji}
-💵 Anlık Fiyat: {format_price(current_price)}
-
-━━━━━━━━━━━
-{dir_emoji} *EN İYİ FIRSAT: {direction}*
-━━━━━━━━━━━
-
-{conf_emoji} *Güven:* {conf}
-📈 *Setup:* {setup_type}
-⏱ *Timeframe:* {tf}
-
-🎯 *Giriş:* {entry}
-🛑 *Stop Loss:* {stop}
-✅ *TP:* {tp}
-📊 *R:R:* {rr:.2f}
-
-━━━━━━━━━━━
-📉 *TEKNİK VERİLER*
-━━━━━━━━━━━
-
-📏 ATR({tf}): {format_price(atr_val)}
-📊 Hacim: {vol_ratio:.2f}x
-
-━━━━━━━━━━━
-🕯 *PDC (Previous Day Candle)*
-━━━━━━━━━━━
-
-• High: {format_price(pdc_high)}
-• Low: {format_price(pdc_low)}
-• Open: {format_price(pdc_open)}
-• Close: {format_price(pdc_close)}
-
-━━━━━━━━━━━━━━━━━━━━━━
-📐 *FİBONACCİ SEVİYELERİ*
-━━━━━━━━━━━━━━━━━━━━━━
-
-• 0.0%: {format_price(fibo.get('0.0', 0))}
-• 23.6%: {format_price(fibo.get('23.6', 0))}
-• 38.2%: {format_price(fibo.get('38.2', 0))}
-• 50.0%: {format_price(fibo.get('50.0', 0))}
-• 61.8%: {format_price(fibo.get('61.8', 0))}
-• 78.6%: {format_price(fibo.get('78.6', 0))}
-• 100%: {format_price(fibo.get('100.0', 0))}
-
-━━━━━━━━━━━━━━━━━━━━━━
-⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
-"""
-            else:
-                plan_msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
-ℹ️ *T-TARS GENEL BAKIŞ*
-━━━━━━━━━━━━━━━━━━━━━━
-
-📊 *{coin_name}* | {bias_emoji}
-💵 Anlık Fiyat: {format_price(current_price)}
-
-⚠️ *Şu an net bir setup bulunamadı.*
-
-━━━━━━━━━━━━━━━━━━━━━━
-🕯 *PDC (Previous Day Candle)*
-━━━━━━━━━━━━━━━━━━━━━━
-
-• High: {format_price(pdc_high)}
-• Low: {format_price(pdc_low)}
-• Open: {format_price(pdc_open)}
-• Close: {format_price(pdc_close)}
-
-━━━━━━━━━━━━━━━━━━━━━━
-📐 *KRİTİK SEVİYELER (Fibo)*
-━━━━━━━━━━━━━━━━━━━━━━
-
-• Destek (61.8%): {format_price(fibo.get('61.8', 0))}
-• Pivot (50.0%): {format_price(fibo.get('50.0', 0))}
-• Direnç (38.2%): {format_price(fibo.get('38.2', 0))}
-
-━━━━━━━━━━━━━━━━━━━━━━
-💡 *ÖNERİ:* PDC High/Low kırılımı
-veya Fibo 61.8% tepkisi bekleyin.
-━━━━━━━━━━━━━━━━━━━━━━
-⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
-"""
-
-            _telegram.send(plan_msg, chat_id=chat_id)
-            
-        except Exception as e:
-            logger.error(f"Smart Plan Error: {e}", exc_info=True)
-            _telegram.send(f"❌ Plan Hatası: {str(e)}", chat_id=chat_id)
-
-    threading.Thread(target=run_plan).start()
-
-
-def handle_execute_command(text, chat_id):
-    def run_execute():
-        try:
-            parts = text.split()
-            ticker = parts[1] if len(parts) > 1 else "BTCUSDT"
-            template = _storage.get_execute_template()
-            prompt = f"Sen T-TARS. {ticker} için Execute şablonunu doldur.\n{template}"
-            result = _grok.analyze(prompt)  # v2.5.4: _claude → _grok
-            message = f"⚡ *T-TARS EXECUTE - {ticker}*\n\n{result['text']}"
-            _telegram.send(message[:4000], chat_id=chat_id)
-        except Exception as e:
-            _telegram.send(f"❌ Execute Hatası: {e}", chat_id=chat_id)
-
-    _telegram.send("⚡ *Durum Kontrol Ediliyor...*", chat_id=chat_id)
-    threading.Thread(target=run_execute).start()
-
-
-def handle_log_command(text, chat_id):
-    def run_log():
-        try:
-            template = _storage.get_log_template()
-            prompt = f"Sen T-TARS. Trade Log şablonunu doldur.\n{template}"
-            result = _grok.analyze(prompt)  # v2.5.4: _claude → _grok
-            message = f"📋 *T-TARS TRADE LOG*\n\n{result['text']}"
-            _telegram.send(message[:4000], chat_id=chat_id)
-        except Exception as e:
-            _telegram.send(f"❌ Log Hatası: {e}", chat_id=chat_id)
-
-    _telegram.send("📋 *Log Hazırlanıyor...*", chat_id=chat_id)
-    threading.Thread(target=run_log).start()
-
-
-# --------------------------
-# TARAMA & İSTATİSTİK KOMUTLARI
-# --------------------------
-
-def handle_scan_command(chat_id):
-    """
-    /scan - Market taraması
-    v2.4.4: market_cache kullanarak TradingView volume verisi
-    """
-    def run_scan():
-        try:
-            pairs = Config.AUTO_SCAN_PAIRS
-            results = []
-            total_new_setups = 0
-            
-            for pair in pairs:
-                try:
-                    coin_name = pair.replace('/USDT:USDT', '').replace('/USDT', '')
-                    
-                    # v2.4.4 FIX: market_cache parametresi eklendi
-                    market_data = _exchange.get_complete_analysis_data(pair, market_cache=_market_cache)
-                    
-                    if not market_data:
-                        results.append(f"⚠️ {coin_name}: No Data")
-                        continue
-
-                    setups = detect_all_trading_setups(pair, market_data)
-                    
-                    if setups:
-                        for setup in setups:
-                            try:
-                                if _tracking:
-                                    _tracking.log_setup({
-                                        'pair': pair.replace('/USDT:USDT', 'USDT'),
-                                        'timestamp': f"{market_data.get('current_date', '')} {market_data.get('current_time', '')}",
-                                        'setup_type': setup.get('type', 'Unknown'),
-                                        'confidence': setup.get('confidence', 'LOW'),
-                                        'timeframe': setup.get('timeframe', '5m'),
-                                        'current_price': market_data.get('current_price', 0),
-                                        'risk_percent': 2.0
-                                    })
-                                    total_new_setups += 1
-                            except:
-                                pass
-                        
-                        results.append(f"✅ {coin_name}: {len(setups)} setup")
-                    else:
-                        results.append(f"ℹ️ {coin_name}: No setup")
-                        
-                except Exception as e:
-                    logger.error(f"Scan error {pair}: {e}")
-                    results.append(f"❌ {coin_name}: Err")
-            
-            # v2.4.4: Cache durumunu göster
-            cache_status = ""
-            if _market_cache:
-                cache_status = f"\n📊 Cache: {len(_market_cache)} entry"
-            
-            msg = "🔍 *TARAMA SONUCU*\n\n" + "\n".join(results)
-            msg += f"\n\n🎯 *Toplam:* {total_new_setups} yeni setup.{cache_status}"
-            
-            _telegram.send(msg, chat_id=chat_id)
-            
-        except Exception as e:
-            logger.error(f"Scan thread error: {e}")
-            _telegram.send(f"❌ Tarama hatası: {str(e)}", chat_id=chat_id)
-
-    _telegram.send(f"🔍 *Market Taraması Başlatıldı* ({len(Config.AUTO_SCAN_PAIRS)} coin)\n⏳ Analiz biraz zaman alabilir...", chat_id=chat_id)
-    threading.Thread(target=run_scan).start()
-
 
 def handle_score_command(chat_id):
-    """/score - Performans raporu v2.4.11 - Worst/Best Coin eklendi"""
+    """/score - Performans raporu"""
     def run_score():
         try:
             if not _exchange:
                 _telegram.send("❌ Exchange servisi aktif değil.", chat_id=chat_id)
                 return
 
-            # v2.4.5: Bakiye bilgisi
             total_balance = 0.0
             available_balance = 0.0
             try:
@@ -388,33 +90,26 @@ def handle_score_command(chat_id):
                 if bal.get('success'):
                     total_balance = float(bal.get('total', 0))
                     available_balance = float(bal.get('free', 0))
-                    logger.info(f"📊 Score balance: Total=${total_balance:.2f}, Available=${available_balance:.2f}")
             except Exception as e:
                 logger.warning(f"Balance fetch error: {e}")
             
-            # v2.4.5: Bitget API'den trade history stats çek
             stats = _exchange.get_trade_history_stats(limit=100)
             
             if not stats.get('success'):
                 _telegram.send(f"❌ Trade history alınamadı: {stats.get('error', 'Unknown')}", chat_id=chat_id)
                 return
             
-            # Stats değerleri
             total_trades = stats.get('total_trades', 0)
             winning_trades = stats.get('winning_trades', 0)
             losing_trades = stats.get('losing_trades', 0)
-            breakeven_trades = stats.get('breakeven_trades', 0)
             win_rate = stats.get('win_rate', 0)
             total_pnl = stats.get('total_pnl', 0)
             
             completed_trades = winning_trades + losing_trades
             loss_rate = 100 - win_rate if completed_trades > 0 else 0
             
-            profit_emoji = "📈" if total_pnl >= 0 else "📉"
             profit_sign = "+" if total_pnl >= 0 else ""
-            profit_pct = (total_pnl / total_balance * 100) if total_balance > 0 else 0
             
-            # v2.4.11: Worst/Best Coin bilgisi
             coin_info = ""
             worst_coin = stats.get('worst_coin')
             best_coin = stats.get('best_coin')
@@ -425,7 +120,6 @@ def handle_score_command(chat_id):
                 if worst_coin:
                     wc_pnl = worst_coin.get('pnl', 0)
                     wc_symbol = worst_coin.get('symbol', 'N/A')
-                    wc_trades = worst_coin.get('trades', 0)
                     wc_wins = worst_coin.get('wins', 0)
                     wc_losses = worst_coin.get('losses', 0)
                     coin_info += f"• 🔴 *En Kötü:* {wc_symbol} (${wc_pnl:+.2f}) [{wc_wins}W/{wc_losses}L]\n"
@@ -433,7 +127,6 @@ def handle_score_command(chat_id):
                 if best_coin:
                     bc_pnl = best_coin.get('pnl', 0)
                     bc_symbol = best_coin.get('symbol', 'N/A')
-                    bc_trades = best_coin.get('trades', 0)
                     bc_wins = best_coin.get('wins', 0)
                     bc_losses = best_coin.get('losses', 0)
                     coin_info += f"• 🟢 *En İyi:* {bc_symbol} (${bc_pnl:+.2f}) [{bc_wins}W/{bc_losses}L]\n"
@@ -447,8 +140,8 @@ def handle_score_command(chat_id):
 • Total: {total_trades} | Win: {winning_trades} | Loss: {losing_trades}
 • Win Rate: %{win_rate:.1f} | Loss Rate: %{loss_rate:.1f}
 
-💰 *P/L Durumu*
-• Bakiye: ${total_balance:,.2f}
+💰 *Bakiye*
+• Toplam: ${total_balance:,.2f}
 • Kullanılabilir: ${available_balance:,.2f}
 
 📊 *Performans*
@@ -473,6 +166,7 @@ def handle_score_command(chat_id):
 
 
 def handle_reset_score_command(chat_id):
+    """/reset_score - İstatistikleri sıfırla"""
     def run_reset():
         try:
             if _tracking and _tracking.reset_all_tracking():
@@ -491,6 +185,7 @@ def handle_reset_score_command(chat_id):
 # --------------------------
 
 def handle_status_command(chat_id):
+    """/status - Sistem durumu"""
     def run_status():
         try:
             import time
@@ -500,7 +195,7 @@ def handle_status_command(chat_id):
                 'telegram': '✅',
                 'bitget_market': '⏳',
                 'bitget_api': '⏳',
-                'grok': '⏳',  # v2.5.4: claude → grok
+                'grok': '⏳',
                 'storage': '⏳'
             }
             
@@ -518,20 +213,18 @@ def handle_status_command(chat_id):
             except:
                 services_status['bitget_api'] = '❌'
             
-            # v2.5.4: XAI_API_KEY kontrolü
             services_status['grok'] = '✅' if Config.XAI_API_KEY else '❌'
             services_status['storage'] = '✅'
             
             check_time = (time.time() - check_start) * 1000
             trading_status = '🔥 AKTİF' if _trading_enabled else '🔴 DURDURULDU'
             
-            # v2.4.4: Cache durumu
             cache_info = f"Cache: {len(_market_cache)} entries" if _market_cache else "Cache: N/A"
             
             msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🤖 *T-TARS DURUM*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 📡 *Servisler*
 • Telegram: {services_status['telegram']}
@@ -543,14 +236,13 @@ def handle_status_command(chat_id):
 📊 *Sistem*
 • Versiyon: v{Config.VERSION}
 • Exchange: Bitget
-• AI Engine: Grok 4.1 Fast Reasoning
+• AI Engine: Grok 4.1
 • Trading: {trading_status}
 • {cache_info}
 • Response: {check_time:.0f}ms
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 ⏰ {get_turkey_time().strftime('%Y-%m-%d %H:%M:%S')} TR
-━━━━━━━━━━━━━━━━━━━━━━
 """
             _telegram.send(msg, chat_id=chat_id)
             
@@ -561,6 +253,7 @@ def handle_status_command(chat_id):
 
 
 def handle_balance_command(chat_id):
+    """/balance - Bakiye sorgula"""
     def run_bal():
         try:
             if not _exchange.authenticated:
@@ -568,15 +261,15 @@ def handle_balance_command(chat_id):
             bal = _exchange.get_balance()
             if bal.get('success'):
                 msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 💰 *BAKİYE*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 • Toplam: ${bal['total']:,.2f}
 • Kullanılabilir: ${bal['free']:,.2f}
 • Kullanımda: ${bal.get('used', 0):,.2f}
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 """
                 _telegram.send(msg, chat_id=chat_id)
             else:
@@ -589,6 +282,7 @@ def handle_balance_command(chat_id):
 
 
 def handle_positions_command(chat_id):
+    """/positions - Açık pozisyonlar"""
     def run_pos():
         try:
             if not _exchange.authenticated:
@@ -597,13 +291,13 @@ def handle_positions_command(chat_id):
             if not pos:
                 return _telegram.send("ℹ️ Açık pozisyon yok", chat_id=chat_id)
             
-            msg = f"━━━━━━━━━━━━━━━━━━━━━━\n📊 *POZİSYONLAR* ({len(pos)})\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            msg = f"━━━━━━━━━━━\n📊 *POZİSYONLAR* ({len(pos)})\n━━━━━━━━━━━\n\n"
             for p in pos:
                 s = '🟢' if str(p['side']).upper() == 'LONG' else '🔴'
                 pl = float(p.get('unrealized_pnl', 0))
                 symbol = p['symbol'].replace('/USDT:USDT', '')
                 msg += f"{s} *{symbol}* | P/L: ${pl:+.2f}\n"
-            msg += "\n━━━━━━━━━━━━━━━━━━━━━━"
+            msg += "\n━━━━━━━━━━━"
             _telegram.send(msg, chat_id=chat_id)
         except Exception as e:
             _telegram.send(f"❌ Hata: {e}", chat_id=chat_id)
@@ -613,61 +307,51 @@ def handle_positions_command(chat_id):
 
 
 def handle_help_command(chat_id):
-    """/help - Yardım ve CHANGELOG (sadece güncel versiyon)"""
+    """/help - Yardım menüsü (v2.7.0 sadeleştirilmiş)"""
     def run_help():
         try:
-            # v2.4.4: Sadece güncel versiyon bilgisi göster
             changelog_text = ""
             try:
                 changelog = _storage.get_changelog()
                 if changelog:
-                    # Sadece ilk versiyon bloğunu al (## v ile başlayan ikinci satıra kadar)
                     lines = changelog.split('\n')
                     current_version_lines = []
                     found_first_version = False
                     
                     for line in lines:
-                        # İlk versiyon başlığını bul
                         if line.startswith('## v') and not found_first_version:
                             found_first_version = True
                             current_version_lines.append(line)
                             continue
                         
-                        # İkinci versiyon başlığına gelince dur
                         if line.startswith('## v') and found_first_version:
                             break
                         
-                        # İlk versiyon içeriğini ekle
                         if found_first_version:
                             current_version_lines.append(line)
                     
                     changelog_text = '\n'.join(current_version_lines).strip()
                     
-                    # Çok uzunsa kısalt
-                    if len(changelog_text) > 600:
-                        changelog_text = changelog_text[:600] + "\n..."
+                    if len(changelog_text) > 500:
+                        changelog_text = changelog_text[:500] + "\n..."
                         
             except Exception as e:
                 logger.warning(f"CHANGELOG fetch error: {e}")
                 changelog_text = "CHANGELOG yüklenemedi"
             
             msg = f"""
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🤖 *T-TARS v{Config.VERSION}*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 Bitget Futures Trading Bot
-AI Engine: Grok 4.1 Fast Reasoning
+AI Engine: Grok 4.1
 
 📋 *KOMUTLAR*
-━━━━━━━━━━━━━━━━━━━━━━
-
-🔍 *Analiz*
-• /plan [coin] - Detaylı analiz
-• /scan - Market taraması
+━━━━━━━━━━━
 
 📊 *İstatistik*
 • /score - Performans raporu
-• /reset\_score - İstatistikleri sıfırla
+• /reset\\_score - İstatistikleri sıfırla
 
 💰 *Hesap*
 • /balance - Bakiye
@@ -679,11 +363,11 @@ AI Engine: Grok 4.1 Fast Reasoning
 • /startbitget - Trading başlat
 • /help - Bu menü
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 📝 *SON GÜNCELLEME*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 {changelog_text}
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 """
             _telegram.send(msg, chat_id=chat_id)
             
@@ -699,12 +383,13 @@ AI Engine: Grok 4.1 Fast Reasoning
 # --------------------------
 
 def handle_stopbitget_command(chat_id):
+    """/stopbitget - Trading durdur"""
     global _trading_enabled
     _trading_enabled = False
     msg = """
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🔴 *TRADİNG DURDURULDU*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 • Yeni emir açılmayacak
 • Grok AI değerlendirme duracak
@@ -712,18 +397,19 @@ def handle_stopbitget_command(chat_id):
 
 Tekrar başlatmak için:
 /startbitget
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 """
     _telegram.send(msg, chat_id=chat_id)
 
 
 def handle_startbitget_command(chat_id):
+    """/startbitget - Trading başlat"""
     global _trading_enabled
     _trading_enabled = True
     msg = """
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 🔥 *LIVE MOD AKTİF*
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 
 • Otomatik trading başladı
 • Grok AI karar verecek
@@ -731,7 +417,7 @@ def handle_startbitget_command(chat_id):
 
 Durdurmak için:
 /stopbitget
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━
 """
     _telegram.send(msg, chat_id=chat_id)
 

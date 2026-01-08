@@ -1,4 +1,29 @@
-# T-TARS Changelog
+# T-TARS - CHANGELOG
+
+## v2.7.0 (2025-01-08)
+
+### 🗑️ REMOVED - Kullanılmayan Komutlar
+- `/plan` - Kullanılmıyordu, kaldırıldı
+- `/scan` - "Setup bulundu" mesajı yetersizdi, kaldırıldı
+- `/execute` - Template doldurma, kullanılmıyordu
+- `/log` - Template doldurma, kullanılmıyordu
+
+### 🗑️ REMOVED - Deprecated Servisler
+- `claude_service.py` - Grok kullanılıyor, dosya silindi
+- `okx_service.py` - Bitget kullanılıyor, dosya silindi
+- `services/__init__.py` - ClaudeService, OKXService export'ları kaldırıldı
+
+### ✨ NEW - Pattern Notifications
+- Trade notification'larına pattern bilgisi eklendi
+- Format: `🕯️ Pattern: Morning Star (95%)`
+- Sadece pattern tespit edildiğinde gösterilir
+
+### 📝 CHANGED
+- `/help` menüsü sadeleştirildi (7 komut kaldı)
+- Notification mesajları düzenlendi (Order ID → Tracking No)
+- Import'lar temizlendi
+
+---
 
 ## v2.6.1 (2026-01-08)
 

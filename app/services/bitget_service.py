@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Bitget Service v2.5.3
+T-TARS Bitget Service v2.5.5
 =============================
 Bitget Exchange Service + Copy Trade API (Direct HTTP)
+
+v2.5.4:
+- NEW: get_position_value_for_coin_direction() - Coin+yön bazlı pozisyon değeri
+- NEW: check_position_limit() - Order açmadan önce limit kontrolü
+- Position stacking koruması (per coin + per direction, bağımsız)
 
 v2.5.3:
 - NEW: 1h volume fallback - MARKET_CACHE expired ise volume_analyzer'dan oku
@@ -12,10 +17,6 @@ v2.5.3:
 v2.5.2:
 - FIX: VOLUME_STRENGTH_HIGH/MEDIUM → VOLUME_GOOD/MEDIUM (DRY fix)
 - Import düzeltildi: calculators'tan doğru constant'lar alınıyor
-
-v2.4.11:
-- NEW: get_pnl_history() coin bazlı PnL agregasyonu
-- NEW: get_trade_history_stats() worst_coin/best_coin döndürüyor
 """
 
 import ccxt
@@ -77,7 +78,7 @@ def round_price_to_precision(price, precision):
 
 
 class BitgetService:
-    """Bitget Borsa Servisi - v2.5.2 (Hedge Mode + Copy Trade API + DRY Fix)"""
+    """Bitget Borsa Servisi - v2.5.4 (Hedge Mode + Copy Trade API + Position Limit)"""
     
     TIMEFRAME_MAP = {
         '1G': '1d', '1d': '1d', '4S': '4h', '4h': '4h',
@@ -205,6 +206,240 @@ class BitgetService:
         except Exception as e:
             logger.error(f"❌ Copy Trade API hatası: {e}")
             return {'success': False, 'orders': [], 'error': str(e)}
+
+    # ============================================
+    # v2.5.4: POSITION LIMIT FUNCTIONS
+    # ============================================
+    
+    def get_position_value_for_coin_direction(self, symbol, direction):
+        """
+        v2.5.4: Belirli bir coin ve yön için mevcut toplam pozisyon değerini hesapla
+        
+        NOT: Her coin+direction kombinasyonu BAĞIMSIZ!
+        - AVAX LONG pozisyonları sadece AVAX LONG limitini etkiler
+        - AVAX SHORT ayrı hesaplanır
+        - BNB hiç etkilenmez
+        
+        Args:
+            symbol: Trading pair (örn: 'AVAX/USDT:USDT' veya 'AVAXUSDT')
+            direction: 'LONG' veya 'SHORT'
+        
+        Returns:
+            dict: {
+                'success': bool,
+                'position_value': float,  # Toplam pozisyon değeri ($)
+                'margin_used': float,     # Kullanılan marjin ($)
+                'position_count': int,    # Pozisyon sayısı
+                'details': list           # Pozisyon detayları
+            }
+        """
+        try:
+            # Symbol'ü normalize et (AVAXUSDT formatına çevir)
+            if '/' in symbol:
+                bitget_symbol = self._get_bitget_symbol(symbol)
+            else:
+                bitget_symbol = symbol.upper()
+                if not bitget_symbol.endswith('USDT'):
+                    bitget_symbol = bitget_symbol + 'USDT'
+            
+            # Direction'ı normalize et
+            pos_side = direction.lower()  # 'long' veya 'short'
+            
+            # Copy Trade pozisyonlarını çek (TÜM pozisyonlar)
+            result = self.get_tracking_orders()
+            
+            if not result.get('success'):
+                logger.warning(f"⚠️ Pozisyon listesi alınamadı: {result.get('error')}")
+                return {
+                    'success': False,
+                    'position_value': 0,
+                    'margin_used': 0,
+                    'position_count': 0,
+                    'details': [],
+                    'error': result.get('error')
+                }
+            
+            orders = result.get('orders', [])
+            
+            # Sadece belirtilen coin + direction için filtrele
+            total_value = 0.0
+            total_margin = 0.0
+            position_count = 0
+            details = []
+            
+            for order in orders:
+                order_symbol = order.get('symbol', '').upper()
+                order_side = order.get('posSide', '').lower()
+                
+                # SADECE aynı coin + aynı yön eşleşmeli
+                if order_symbol == bitget_symbol and order_side == pos_side:
+                    try:
+                        # Pozisyon değeri hesapla
+                        open_size = float(order.get('openSize', 0))
+                        open_price = float(order.get('openPriceAvg', 0))
+                        leverage = float(order.get('openLeverage', Config.DEFAULT_LEVERAGE))
+                        
+                        position_value = open_size * open_price
+                        margin = position_value / leverage if leverage > 0 else position_value
+                        
+                        total_value += position_value
+                        total_margin += margin
+                        position_count += 1
+                        
+                        details.append({
+                            'tracking_no': order.get('trackingNo'),
+                            'size': open_size,
+                            'entry_price': open_price,
+                            'position_value': position_value,
+                            'margin': margin,
+                            'leverage': leverage
+                        })
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"⚠️ Pozisyon parse hatası: {e}")
+                        continue
+            
+            coin_name = bitget_symbol.replace('USDT', '')
+            logger.info(f"📊 {coin_name} {pos_side.upper()}: {position_count} pozisyon, "
+                       f"Value=${total_value:.2f}, Margin=${total_margin:.2f}")
+            
+            return {
+                'success': True,
+                'position_value': total_value,
+                'margin_used': total_margin,
+                'position_count': position_count,
+                'details': details
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ get_position_value_for_coin_direction error: {e}")
+            return {
+                'success': False,
+                'position_value': 0,
+                'margin_used': 0,
+                'position_count': 0,
+                'details': [],
+                'error': str(e)
+            }
+
+    def check_position_limit(self, symbol, direction, new_position_value):
+        """
+        v2.5.4: Yeni pozisyon açılmadan önce limit kontrolü yap
+        
+        ÖNEMLI: Her coin+direction kombinasyonu BAĞIMSIZ hesaplanır!
+        - AVAX LONG $4000'a ulaşmış → Yeni AVAX LONG açılamaz
+        - AVAX SHORT hala açılabilir (ayrı limit)
+        - BNB etkilenmez (farklı coin)
+        
+        Args:
+            symbol: Trading pair
+            direction: 'LONG' veya 'SHORT'
+            new_position_value: Yeni açılacak pozisyonun değeri ($)
+        
+        Returns:
+            dict: {
+                'allowed': bool,
+                'reason': str,
+                'current_value': float,
+                'new_total': float,
+                'limit': float
+            }
+        """
+        try:
+            max_value = Config.MAX_POSITION_VALUE_PER_COIN_DIRECTION
+            max_margin = Config.MAX_MARGIN_PER_COIN_DIRECTION
+            
+            # Coin adını çıkar (log için)
+            if '/' in symbol:
+                coin_name = symbol.split('/')[0]
+            else:
+                coin_name = symbol.replace('USDT', '').replace('/USDT:USDT', '')
+            
+            # Bu coin + bu direction için mevcut pozisyon değerini al
+            current = self.get_position_value_for_coin_direction(symbol, direction)
+            
+            if not current.get('success'):
+                # API hatası durumunda güvenli tarafta kal, izin ver ama uyar
+                logger.warning(f"⚠️ {coin_name} {direction}: Limit kontrol edilemedi, devam ediliyor")
+                return {
+                    'allowed': True,
+                    'reason': 'API error, allowing trade',
+                    'current_value': 0,
+                    'new_total': new_position_value,
+                    'limit': max_value
+                }
+            
+            current_value = current.get('position_value', 0)
+            current_margin = current.get('margin_used', 0)
+            position_count = current.get('position_count', 0)
+            
+            # Yeni toplam hesapla
+            new_total_value = current_value + new_position_value
+            new_margin = new_position_value / Config.DEFAULT_LEVERAGE
+            new_total_margin = current_margin + new_margin
+            
+            # Pozisyon değeri limiti kontrolü
+            if new_total_value > max_value:
+                reason = (f"🚫 {coin_name} {direction}: Pozisyon limiti aşılıyor! "
+                         f"Mevcut: ${current_value:.2f} ({position_count} poz) + "
+                         f"Yeni: ${new_position_value:.2f} = ${new_total_value:.2f} > Limit: ${max_value:.2f}")
+                logger.warning(reason)
+                return {
+                    'allowed': False,
+                    'reason': reason,
+                    'current_value': current_value,
+                    'current_margin': current_margin,
+                    'position_count': position_count,
+                    'new_total': new_total_value,
+                    'limit': max_value,
+                    'limit_type': 'position_value'
+                }
+            
+            # Marjin limiti kontrolü
+            if new_total_margin > max_margin:
+                reason = (f"🚫 {coin_name} {direction}: Marjin limiti aşılıyor! "
+                         f"Mevcut: ${current_margin:.2f} + Yeni: ${new_margin:.2f} = "
+                         f"${new_total_margin:.2f} > Limit: ${max_margin:.2f}")
+                logger.warning(reason)
+                return {
+                    'allowed': False,
+                    'reason': reason,
+                    'current_value': current_value,
+                    'current_margin': current_margin,
+                    'position_count': position_count,
+                    'new_total': new_total_value,
+                    'new_total_margin': new_total_margin,
+                    'limit': max_margin,
+                    'limit_type': 'margin'
+                }
+            
+            # Limit içinde
+            logger.info(f"✅ {coin_name} {direction}: Limit OK - "
+                       f"Mevcut: ${current_value:.2f} ({position_count} poz), "
+                       f"Yeni: ${new_position_value:.2f}, "
+                       f"Toplam: ${new_total_value:.2f} / ${max_value:.2f}")
+            
+            return {
+                'allowed': True,
+                'reason': 'Within limits',
+                'current_value': current_value,
+                'current_margin': current_margin,
+                'position_count': position_count,
+                'new_total': new_total_value,
+                'new_total_margin': new_total_margin,
+                'limit': max_value
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ check_position_limit error: {e}")
+            # Hata durumunda güvenli tarafta kal, izin ver
+            return {
+                'allowed': True,
+                'reason': f'Error checking limit: {e}',
+                'current_value': 0,
+                'new_total': new_position_value,
+                'limit': Config.MAX_POSITION_VALUE_PER_COIN_DIRECTION
+            }
     
     def modify_tracking_tpsl(self, tracking_no, symbol, tp_price=None, sl_price=None):
         self._require_auth()

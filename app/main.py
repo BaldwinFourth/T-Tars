@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Bot v2.7.0
+T-TARS Trading Bot v2.7.1
 ===========================
 Main Flask application with routes.
+
+v2.7.1:
+- NEW: Position stacking limit kontrolü (per coin + per direction)
+- NEW: check_position_limit() entegrasyonu - execute_trade_for_setup öncesi
+- Limitler: MAX_MARGIN_PER_COIN_DIRECTION=$200, MAX_POSITION_VALUE=$4000
 
 v2.7.0:
 - REMOVED: /plan, /scan, /execute, /log komutları
@@ -127,7 +132,11 @@ def index():
         "lock_status": "locked" if SCAN_LOCK.locked() else "free",
         "market_cache_size": len(MARKET_CACHE),
         "market_cache_ttl": Config.MARKET_CACHE_TTL,
-        "volume_store_size": vol_stats.get('total', 0)
+        "volume_store_size": vol_stats.get('total', 0),
+        "position_limits": {
+            "max_margin_per_coin_direction": Config.MAX_MARGIN_PER_COIN_DIRECTION,
+            "max_position_value_per_coin_direction": Config.MAX_POSITION_VALUE_PER_COIN_DIRECTION
+        }
     })
 
 
@@ -447,7 +456,7 @@ def monitor_setups():
 
 @app.route('/analyze', methods=['POST', 'GET'])
 def auto_analyze():
-    """Grok 4.1 Fast Reasoning ile Otomatik Tarama + Pattern Detection"""
+    """Grok 4.1 Fast Reasoning ile Otomatik Tarama + Pattern Detection + Position Limit"""
     global LAST_CLEANUP_DATE
     
     interval = Config.MONITOR_INTERVAL_MINUTES
@@ -506,6 +515,7 @@ def auto_analyze():
             total_setups = 0
             orders_placed = 0
             grok_skips = 0
+            limit_skips = 0  # v2.7.1: Position limit nedeniyle atlanlar
             cache_hits = 0
             cache_misses = 0
             
@@ -615,11 +625,51 @@ def auto_analyze():
                             stop_price = adjustments.get('stop_price', setup.get('stop_price'))
                             tp_price = adjustments.get('tp_price', setup.get('tp_price'))
                             
+                            # ============================================
+                            # v2.7.1: POSITION STACKING LIMIT KONTROLÜ
+                            # ============================================
+                            entry_price = setup.get('entry_price', 0)
+                            
+                            # Pozisyon değerini hesapla (calculate_position_size fonksiyonu notional döner)
+                            notional_usd = bitget.calculate_position_size(entry_price, stop_price)
+                            
+                            # Coin+direction bazlı limit kontrolü
+                            limit_check = bitget.check_position_limit(
+                                symbol=pair,
+                                direction=direction,
+                                new_position_value=notional_usd
+                            )
+                            
+                            if not limit_check.get('allowed'):
+                                limit_skips += 1
+                                reason = limit_check.get('reason', 'Position limit exceeded')
+                                current_val = limit_check.get('current_value', 0)
+                                new_total = limit_check.get('new_total', 0)
+                                limit_val = limit_check.get('limit', 0)
+                                pos_count = limit_check.get('position_count', 0)
+                                
+                                logger.warning(f"🚫 LIMIT: {coin_name} {direction} - {reason}")
+                                
+                                # Telegram'a bildir
+                                telegram.send(
+                                    f"🚫 *POZİSYON LİMİTİ*\n\n"
+                                    f"📊 *{coin_name}* | {direction}\n"
+                                    f"⏱️ {timeframe}\n\n"
+                                    f"📦 Mevcut: ${current_val:.2f} ({pos_count} poz)\n"
+                                    f"➕ Yeni: ${notional_usd:.2f}\n"
+                                    f"📊 Toplam: ${new_total:.2f}\n"
+                                    f"🚧 Limit: ${limit_val:.2f}\n\n"
+                                    f"❌ *Bu trade atlandı*",
+                                    chat_id=Config.TELEGRAM_CHAT_ID
+                                )
+                                continue
+                            # ============================================
+                            
                             exec_result = bitget.execute_trade_for_setup(
                                 setup_data={
                                     'pair': pair,
                                     'direction': direction,
-                                    'entry_price': setup.get('entry_price'),
+                                    'entry_price': entry_price,
                                     'stop_price': stop_price,
                                     'tp_price': tp_price
                                 },
@@ -717,13 +767,14 @@ def auto_analyze():
                     logger.error(f"Pair analyze error ({pair}): {e}")
             
             vol_stats = get_volume_store_stats()
-            logger.info(f"✅ Auto analyze: {orders_placed} orders, {grok_skips} skipped | Cache: {cache_hits} hits, {cache_misses} misses")
+            logger.info(f"✅ Auto analyze: {orders_placed} orders, {grok_skips} grok_skips, {limit_skips} limit_skips | Cache: {cache_hits} hits, {cache_misses} misses")
             gc.collect()
             
             response = {
                 "status": "success",
                 "orders": orders_placed,
                 "grok_skips": grok_skips,
+                "limit_skips": limit_skips,  # v2.7.1
                 "setups_logged": total_setups,
                 "volume_cache_hits": cache_hits,
                 "volume_cache_misses": cache_misses,

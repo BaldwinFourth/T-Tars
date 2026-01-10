@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.5.9
+T-TARS Configuration v2.7.1
 ============================
+
+v2.7.1:
+- NEW: MAX_MARGIN_PER_COIN_DIRECTION - Coin+yön bazlı max marjin ($200)
+- NEW: MAX_POSITION_VALUE_PER_COIN_DIRECTION - Coin+yön bazlı max pozisyon ($4000)
+- Position stacking kontrolü için limitler (per coin + per direction)
 
 v2.5.9:
 - REMOVED: JUP, NIGHT, HYPE çıkarıldı
@@ -12,12 +17,6 @@ v2.5.3:
 - NEW: XAI_API_KEY - Grok API anahtarı
 - NEW: GROK_MODEL - grok-4-1-fast-reasoning
 - CHANGED: Claude → Grok AI geçişi
-- REMOVED: ANTHROPIC_API_KEY, CLAUDE_MODEL (deprecated)
-
-v2.4.13:
-- REMOVED: XAUTUSDT çıkarıldı (yüksek fonlama oranı)
-- ADDED: LTCUSDT, SUIUSDT, ADAUSDT, AVAXUSDT, HYPEUSDT eklendi
-- Toplam: 14 coin
 """
 
 import os
@@ -25,7 +24,7 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.5.9"""
+    """T-TARS Configuration v2.7.1"""
     
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
@@ -128,6 +127,12 @@ class Config:
     CLOSE_SLIPPAGE_PCT = float(os.getenv('CLOSE_SLIPPAGE_PCT', '0.002'))
     MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '500'))
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
+    
+    # v2.7.1: Position Stacking Limitleri (per coin + per direction)
+    # NOT: Her coin+direction kombinasyonu BAĞIMSIZ hesaplanır!
+    # Örnek: AVAX LONG = max $4000, AVAX SHORT = ayrı max $4000, BNB etkilenmez
+    MAX_MARGIN_PER_COIN_DIRECTION = float(os.getenv('MAX_MARGIN_PER_COIN_DIRECTION', '200'))  # $200 marjin
+    MAX_POSITION_VALUE_PER_COIN_DIRECTION = float(os.getenv('MAX_POSITION_VALUE_PER_COIN_DIRECTION', '4000'))  # $4000 pozisyon (20x)
     
     # ============================================
     # CACHE & MONITORING

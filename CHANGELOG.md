@@ -1,3 +1,26 @@
+# T-TARS Trading Bot - CHANGELOG
+
+## v2.7.1 (2025-01-10)
+
+### 🆕 YENİ ÖZELLİKLER
+- **Position Stacking Limit Kontrolü**: Aynı coin + aynı yönde aşırı pozisyon birikmesini engeller
+  - `MAX_MARGIN_PER_COIN_DIRECTION`: $200 (varsayılan)
+  - `MAX_POSITION_VALUE_PER_COIN_DIRECTION`: $4000 (varsayılan)
+  - Her coin+direction kombinasyonu BAĞIMSIZ hesaplanır
+  - Örnek: AVAX LONG $4000 limitine ulaşsa bile, AVAX SHORT veya BNB LONG etkilenmez
+
+### 📁 DEĞİŞEN DOSYALAR
+- `config.py`: Position limit sabitleri eklendi
+- `bitget_service.py`: `get_position_value_for_coin_direction()` ve `check_position_limit()` fonksiyonları
+- `main.py`: `/analyze` route'unda execute_trade_for_setup öncesi limit kontrolü
+
+### 🔧 TEKNİK DETAYLAR
+- Limit aşıldığında Telegram'a bildirim gönderilir
+- `limit_skips` sayacı eklendi (response'da görünür)
+- API hatası durumunda fail-safe: trade'e izin verilir
+- Loglama: Her kontrol detaylı loglanır
+
+---
 # T-TARS - CHANGELOG
 
 ## v2.7.0 (2025-01-08)

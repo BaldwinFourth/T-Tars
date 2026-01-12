@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Strategies v2.6.0
+T-TARS Strategies v2.8.0
 ==========================
 Trading strategy modülleri.
+
+v2.8.0:
+- NEW: TIMEFRAME_HIERARCHY export
+- NEW: check_pdc_breakout, get_intraday_bias, is_higher_tf_aligned, get_tf_priority, is_tf_higher exportları
 
 v2.6.0:
 - NEW: detect_candle_patterns export
@@ -42,6 +46,13 @@ from .calculators import (
     check_doji,
     # v2.6.0: Pattern Detection
     detect_candle_patterns,
+    # v2.8.0: TF Hierarchy & PDC Breakout
+    TIMEFRAME_HIERARCHY,
+    check_pdc_breakout,
+    get_intraday_bias,
+    is_higher_tf_aligned,
+    get_tf_priority,
+    is_tf_higher,
     # R:R Constants
     MIN_RR_RATIO,
     STOP_MULTIPLIER,
@@ -146,6 +157,13 @@ __all__ = [
     'check_doji',
     # Calculators - Pattern Detection (v2.6.0)
     'detect_candle_patterns',
+    # Calculators - TF Hierarchy & PDC Breakout (v2.8.0)
+    'TIMEFRAME_HIERARCHY',
+    'check_pdc_breakout',
+    'get_intraday_bias',
+    'is_higher_tf_aligned',
+    'get_tf_priority',
+    'is_tf_higher',
     # Calculators - R:R Constants
     'MIN_RR_RATIO',
     'STOP_MULTIPLIER',

@@ -1,6 +1,55 @@
-# T-TARS Trading Bot - CHANGELOG
+## v2.8.0 (2026-01-12)
 
-## v2.7.1 (2025-01-10)
+### 🆕 YENİ ÖZELLİKLER
+
+**Timeframe Hierarchy Sistemi**
+- 1D > 1h > 15m hiyerarşisi uygulandı
+- 15m setup: Sadece 1D ve 1h aynı yönde ise geçerli
+- 1h setup: Sadece 1D aynı yönde ise geçerli
+- Çakışma durumunda: `⚠️ TF HIERARCHY MISMATCH` logu + SKIP
+
+**PDC Breakout Detection**
+- PDC High/Low kırılımı otomatik tespit
+- Price > PDC High → Intraday bias LONG'a döner
+- Price < PDC Low → Intraday bias SHORT'a döner
+- Breakout logu: `🚨 PAIR: PDC High/Low kırıldı → Intraday bias: X`
+
+**Intraday Bias Updates**
+- `get_intraday_bias()` fonksiyonu eklendi
+- Bias source tracking: PDC, BREAKOUT_HIGH, BREAKOUT_LOW
+- Setup'lara `bias_source` ve `pdc_breakout` field'ları eklendi
+
+### 🔄 DEĞİŞİKLİKLER
+
+**PineScript v16 (9 Coin)**
+- 14 → 9 coin'e düşürüldü
+- REMOVED: TRX, LTC, PEPE, LINK, AVAX
+- KEPT: ETH, BNB, XRP, SOL, DOGE, BCH, ZEC, SUI, ADA
+
+### 📁 DEĞİŞEN DOSYALAR
+- `calculators.py`: TIMEFRAME_HIERARCHY, check_pdc_breakout(), get_intraday_bias(), is_higher_tf_aligned()
+- `setup_detector.py`: HTF alignment check, breakout integration
+- `strategies/__init__.py`: Yeni export'lar
+
+### 🔧 TEKNİK DETAYLAR
+
+**Yeni Sabitler (calculators.py):**
+```python
+TIMEFRAME_HIERARCHY = {
+    '1D': 0, '4h': 1, '1h': 2, '15m': 3, '5m': 4, '3m': 5
+}
+```
+
+**Yeni Fonksiyonlar:**
+- `is_higher_tf_aligned(setup_tf, setup_direction, htf_bias)` - Üst TF bias kontrolü
+- `check_pdc_breakout(current_price, pdc, previous_bias)` - PDC kırılma tespiti
+- `get_intraday_bias(current_price, pdc, pdc_bias)` - Güncel intraday bias
+- `get_tf_priority(timeframe)` - TF öncelik numarası
+- `is_tf_higher(tf1, tf2)` - TF karşılaştırma
+
+---
+
+## v2.7.1 (2026-01-10)
 
 ### 🆕 YENİ ÖZELLİKLER
 - **Position Stacking Limit Kontrolü**: Aynı coin + aynı yönde aşırı pozisyon birikmesini engeller
@@ -21,9 +70,8 @@
 - Loglama: Her kontrol detaylı loglanır
 
 ---
-# T-TARS - CHANGELOG
 
-## v2.7.0 (2025-01-08)
+## v2.7.0 (2026-01-08)
 
 ### 🗑️ REMOVED - Kullanılmayan Komutlar
 - `/plan` - Kullanılmıyordu, kaldırıldı

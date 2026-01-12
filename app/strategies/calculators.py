@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Trading Calculators v2.6.1
+T-TARS Trading Calculators v2.8.0
 ===================================
+v2.8.0:
+- NEW: TIMEFRAME_HIERARCHY constant (1D > 1h > 15m)
+- NEW: check_pdc_breakout() - PDC High/Low kırılma tespiti
+- NEW: is_higher_tf_aligned() - Üst TF bias uyumu kontrolü
+- NEW: get_intraday_bias() - Güncel fiyata göre intraday bias
+
 v2.6.1:
 - FIX: Momentum body_sizes artık body_ratio kullanıyor (universal, fiyattan bağımsız)
 - FIX: Küçük fiyatlı coinlerde (PEPE, DOGE) 0.0 sorunu çözüldü
@@ -35,6 +41,24 @@ v2.4.10:
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ============================================
+# v2.7.0: TIMEFRAME HIERARCHY
+# ============================================
+# 1D (PDC) > 1h > 15m
+# Üst timeframe bias'ı alt timeframe'i yönetir
+TIMEFRAME_HIERARCHY = {
+    '1D': 0,   # En yüksek öncelik (PDC)
+    '4h': 1,
+    '1h': 2,
+    '15m': 3,
+    '5m': 4,
+    '3m': 5    # En düşük öncelik
+}
+
+# TF Grupları - aynı grup içindeki TF'ler aynı bias'ta olmalı
+TF_GROUP_HTF = ['1D', '4h', '1h']  # Higher Timeframes
+TF_GROUP_LTF = ['15m', '5m', '3m']  # Lower Timeframes
 
 # ============================================
 # ATR MULTIPLIERS - STOP & TP (v2.4.10)
@@ -281,6 +305,197 @@ def calculate_setup_strength(volume_spike_ratio, ob_or_fvg_strength, rr_ratio):
 def is_valid_setup(rr_ratio):
     """R:R minimum gerekliliği karşılıyor mu?"""
     return rr_ratio >= MIN_RR_RATIO
+
+
+# ============================================
+# v2.7.0: PDC BREAKOUT & INTRADAY BIAS
+# ============================================
+
+def check_pdc_breakout(current_price, pdc, previous_bias):
+    """
+    PDC High/Low kırılma kontrolü.
+    
+    Kural:
+    - Fiyat PDC High'ı kırarsa → Bias LONG'a döner
+    - Fiyat PDC Low'u kırarsa → Bias SHORT'a döner
+    
+    Args:
+        current_price: Şu anki fiyat
+        pdc: {'high', 'low', 'open', 'close', 'type'}
+        previous_bias: Önceki bias ('LONG' veya 'SHORT')
+    
+    Returns:
+        {
+            'breakout_detected': bool,
+            'breakout_type': 'HIGH' | 'LOW' | None,
+            'new_bias': 'LONG' | 'SHORT',
+            'bias_changed': bool,
+            'message': str
+        }
+    """
+    if not pdc or current_price <= 0:
+        return {
+            'breakout_detected': False,
+            'breakout_type': None,
+            'new_bias': previous_bias,
+            'bias_changed': False,
+            'message': 'Yetersiz veri'
+        }
+    
+    pdc_high = pdc.get('high', 0)
+    pdc_low = pdc.get('low', 0)
+    
+    # PDC High kırıldı mı?
+    if current_price > pdc_high:
+        new_bias = 'LONG'
+        bias_changed = previous_bias != 'LONG'
+        
+        return {
+            'breakout_detected': True,
+            'breakout_type': 'HIGH',
+            'new_bias': new_bias,
+            'bias_changed': bias_changed,
+            'message': f'PDC High ({format_price(pdc_high)}) kırıldı → Intraday bias: LONG'
+        }
+    
+    # PDC Low kırıldı mı?
+    if current_price < pdc_low:
+        new_bias = 'SHORT'
+        bias_changed = previous_bias != 'SHORT'
+        
+        return {
+            'breakout_detected': True,
+            'breakout_type': 'LOW',
+            'new_bias': new_bias,
+            'bias_changed': bias_changed,
+            'message': f'PDC Low ({format_price(pdc_low)}) kırıldı → Intraday bias: SHORT'
+        }
+    
+    # Fiyat PDC içinde
+    return {
+        'breakout_detected': False,
+        'breakout_type': None,
+        'new_bias': previous_bias,
+        'bias_changed': False,
+        'message': f'Fiyat PDC içinde ({format_price(pdc_low)} - {format_price(pdc_high)})'
+    }
+
+
+def get_intraday_bias(current_price, pdc, pdc_bias):
+    """
+    Güncel fiyata göre intraday bias belirle.
+    
+    Mantık:
+    1. PDC rengine göre base bias belirlenir
+    2. Fiyat PDC High'ı kırarsa → LONG (bullish breakout)
+    3. Fiyat PDC Low'u kırarsa → SHORT (bearish breakout)
+    4. Fiyat PDC içindeyse → PDC bias'ı geçerli
+    
+    Args:
+        current_price: Şu anki fiyat
+        pdc: {'high', 'low', 'open', 'close', 'type'}
+        pdc_bias: PDC'den gelen bias ('LONG' veya 'SHORT')
+    
+    Returns:
+        {
+            'bias': 'LONG' | 'SHORT',
+            'source': 'PDC' | 'BREAKOUT_HIGH' | 'BREAKOUT_LOW',
+            'in_pdc_range': bool
+        }
+    """
+    if not pdc or current_price <= 0:
+        return {
+            'bias': pdc_bias,
+            'source': 'PDC',
+            'in_pdc_range': True
+        }
+    
+    pdc_high = pdc.get('high', 0)
+    pdc_low = pdc.get('low', 0)
+    
+    # PDC High kırıldı
+    if current_price > pdc_high:
+        return {
+            'bias': 'LONG',
+            'source': 'BREAKOUT_HIGH',
+            'in_pdc_range': False
+        }
+    
+    # PDC Low kırıldı
+    if current_price < pdc_low:
+        return {
+            'bias': 'SHORT',
+            'source': 'BREAKOUT_LOW',
+            'in_pdc_range': False
+        }
+    
+    # PDC içinde - PDC bias'ı kullan
+    return {
+        'bias': pdc_bias,
+        'source': 'PDC',
+        'in_pdc_range': True
+    }
+
+
+def is_higher_tf_aligned(setup_tf, setup_direction, htf_bias):
+    """
+    Setup timeframe'inin üst TF bias'ıyla uyumlu olup olmadığını kontrol et.
+    
+    Kural: 1D (PDC) > 1h > 15m
+    - 15m setup yalnızca 1h ve 1D aynı yönde ise geçerli
+    - 1h setup yalnızca 1D ile aynı yönde ise geçerli
+    
+    Args:
+        setup_tf: Setup timeframe'i ('15m', '1h', vb.)
+        setup_direction: Setup yönü ('LONG' veya 'SHORT')
+        htf_bias: Üst TF bias bilgisi {'1D': 'LONG', '1h': 'LONG', ...}
+    
+    Returns:
+        {
+            'aligned': bool,
+            'conflicts': list,  # Uyumsuz TF'ler
+            'message': str
+        }
+    """
+    if not htf_bias:
+        return {
+            'aligned': True,
+            'conflicts': [],
+            'message': 'HTF verisi yok, kontrol atlandı'
+        }
+    
+    setup_priority = TIMEFRAME_HIERARCHY.get(setup_tf, 99)
+    conflicts = []
+    
+    # Daha yüksek öncelikli (daha küçük numara) TF'leri kontrol et
+    for tf, priority in TIMEFRAME_HIERARCHY.items():
+        if priority < setup_priority:  # Daha yüksek TF
+            tf_bias = htf_bias.get(tf)
+            if tf_bias and tf_bias != setup_direction:
+                conflicts.append(f"{tf}={tf_bias}")
+    
+    if conflicts:
+        return {
+            'aligned': False,
+            'conflicts': conflicts,
+            'message': f'{setup_tf} {setup_direction} HTF ile uyumsuz: {", ".join(conflicts)}'
+        }
+    
+    return {
+        'aligned': True,
+        'conflicts': [],
+        'message': f'{setup_tf} {setup_direction} HTF ile uyumlu'
+    }
+
+
+def get_tf_priority(timeframe):
+    """Timeframe öncelik sırasını döndür (düşük = yüksek öncelik)."""
+    return TIMEFRAME_HIERARCHY.get(timeframe, 99)
+
+
+def is_tf_higher(tf1, tf2):
+    """tf1, tf2'den daha yüksek TF mi?"""
+    return get_tf_priority(tf1) < get_tf_priority(tf2)
 
 
 # ============================================

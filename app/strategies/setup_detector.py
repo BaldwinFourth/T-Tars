@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Setup Detector v2.6.0
+T-TARS Setup Detector v2.8.0
 =============================
-Trading setup orchestrator with PDC bias + Fibo zone filtering.
+Trading setup orchestrator with PDC bias + Fibo zone filtering + TF Hierarchy.
+
+v2.8.0:
+- NEW: Timeframe hierarchy enforcement (1D > 1h > 15m)
+- NEW: is_higher_tf_aligned() kontrolü
+- NEW: check_pdc_breakout() entegrasyonu
+- NEW: Intraday bias değişiklik desteği
+- IMPORT: TIMEFRAME_HIERARCHY, check_pdc_breakout, is_higher_tf_aligned, get_intraday_bias
 
 v2.6.0:
 - NEW: Pattern detection bilgisi setup'a ekleniyor
@@ -42,7 +49,13 @@ from app.strategies.calculators import (
     is_in_ob_zone,
     is_in_fvg_zone,
     FVG_ZONE_MIN,
-    FVG_ZONE_MAX
+    FVG_ZONE_MAX,
+    # v2.7.0: Yeni import'lar
+    TIMEFRAME_HIERARCHY,
+    check_pdc_breakout,
+    is_higher_tf_aligned,
+    get_intraday_bias,
+    format_price
 )
 
 logger = logging.getLogger(__name__)
@@ -99,6 +112,7 @@ def detect_trading_setup(pair, market_data):
     """
     Otomatik tarama için - Tek setup döndürür.
     
+    v2.7.0: TF Hierarchy + PDC Breakout entegrasyonu
     v2.6.0: Pattern detection entegrasyonu
     """
     try:
@@ -110,12 +124,24 @@ def detect_trading_setup(pair, market_data):
         daily_ohlcv = market_data.get('daily_ohlcv', [])
         if daily_ohlcv and len(daily_ohlcv) >= 5:
             pdc_result = calculate_pdc_bias(daily_ohlcv)
-            bias = pdc_result['bias']
-            bias_str = 'bullish' if bias == 'LONG' else 'bearish'
+            pdc_bias = pdc_result['bias']
             pdc = pdc_result['pdc']
             doji_warning = pdc_result['doji_warning']
             reversal_mode = pdc_result['reversal_mode']
             pattern_result = pdc_result.get('pattern')  # v2.6.0: Yeni
+            
+            # v2.7.0: PDC Breakout kontrolü - Intraday bias belirleme
+            current_price = market_data.get('current_price', 0)
+            intraday_result = get_intraday_bias(current_price, pdc, pdc_bias)
+            bias = intraday_result['bias']
+            bias_source = intraday_result['source']
+            
+            # v2.7.0: Breakout bildirimi için bilgi
+            breakout_result = check_pdc_breakout(current_price, pdc, pdc_bias)
+            if breakout_result['breakout_detected']:
+                logger.info(f"🚨 {pair}: {breakout_result['message']}")
+            
+            bias_str = 'bullish' if bias == 'LONG' else 'bearish'
             
             # Fibo zone hesapla
             fibo_data = calculate_fibo_zones(pdc, bias)
@@ -129,15 +155,21 @@ def detect_trading_setup(pair, market_data):
             
             if doji_warning:
                 logger.info(f"⚠️ {pair}: Doji uyarısı! Count={pdc_result['doji_count']}, PDC_is_Doji={pdc_result['pdc_is_doji']}, Reversal={reversal_mode}")
+            
+            # v2.7.0: Bias source loglama
+            if bias_source != 'PDC':
+                logger.info(f"📊 {pair}: Intraday bias={bias} (source: {bias_source})")
         else:
             # Fallback: Eski yöntem
             pdc = market_data.get('previous_day', {})
             bias = 'LONG' if pdc.get('candle_type') == 'green' else 'SHORT'
             bias_str = 'bullish' if bias == 'LONG' else 'bearish'
+            bias_source = 'PDC'
             fibo_data = None
             doji_warning = False
             reversal_mode = False
             pattern_result = None
+            breakout_result = None
         
         current_price = market_data.get('current_price', 0)
         
@@ -190,7 +222,7 @@ def detect_trading_setup(pair, market_data):
             if obs_before > len(obs) or fvgs_before > len(fvgs):
                 logger.info(f"📐 {pair}: Fibo filtre: OB {obs_before}→{len(obs)}, FVG {fvgs_before}→{len(fvgs)}")
         
-        logger.info(f"🔍 {pair}: TF={timeframe}, OB={len(obs)}, FVG={len(fvgs)}, Bias={bias}, Doji={doji_warning}")
+        logger.info(f"🔍 {pair}: TF={timeframe}, OB={len(obs)}, FVG={len(fvgs)}, Bias={bias} ({bias_source}), Doji={doji_warning}")
         
         # OB Kontrol
         if len(obs) > 0:
@@ -201,10 +233,14 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    result['bias_source'] = bias_source  # v2.7.0
                     # v2.6.0: Pattern bilgisi ekle
                     if pattern_result:
                         result['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         result['pattern_data'] = pattern_result
+                    # v2.7.0: Breakout bilgisi
+                    if breakout_result:
+                        result['pdc_breakout'] = breakout_result
                     logger.info(f"✅ {pair}: OB LONG setup bulundu!")
                 return result
             elif bias_str == 'bearish' and ob['type'] == 'bearish':
@@ -212,10 +248,14 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    result['bias_source'] = bias_source  # v2.7.0
                     # v2.6.0: Pattern bilgisi ekle
                     if pattern_result:
                         result['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         result['pattern_data'] = pattern_result
+                    # v2.7.0: Breakout bilgisi
+                    if breakout_result:
+                        result['pdc_breakout'] = breakout_result
                     logger.info(f"✅ {pair}: OB SHORT setup bulundu!")
                 return result
             else:
@@ -231,10 +271,14 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    result['bias_source'] = bias_source  # v2.7.0
                     # v2.6.0: Pattern bilgisi ekle
                     if pattern_result:
                         result['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         result['pattern_data'] = pattern_result
+                    # v2.7.0: Breakout bilgisi
+                    if breakout_result:
+                        result['pdc_breakout'] = breakout_result
                     logger.info(f"✅ {pair}: FVG LONG setup bulundu!")
                 return result
             elif bias_str == 'bearish' and fvg['type'] == 'bearish':
@@ -242,10 +286,14 @@ def detect_trading_setup(pair, market_data):
                 if result:
                     result['doji_warning'] = doji_warning
                     result['reversal_mode'] = reversal_mode
+                    result['bias_source'] = bias_source  # v2.7.0
                     # v2.6.0: Pattern bilgisi ekle
                     if pattern_result:
                         result['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         result['pattern_data'] = pattern_result
+                    # v2.7.0: Breakout bilgisi
+                    if breakout_result:
+                        result['pdc_breakout'] = breakout_result
                     logger.info(f"✅ {pair}: FVG SHORT setup bulundu!")
                 return result
             else:
@@ -260,10 +308,11 @@ def detect_trading_setup(pair, market_data):
         return False
 
 
-def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data=None, pattern_result=None):
+def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data=None, pattern_result=None, htf_bias=None):
     """
     Belirli bir timeframe için setup kontrol et.
     
+    v2.7.0: htf_bias parametresi + TF hierarchy kontrolü
     v2.6.0: pattern_result parametresi eklendi
     """
     setups = []
@@ -286,6 +335,13 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
         
         bias_str = 'bullish' if bias == 'LONG' else 'bearish'
         
+        # v2.7.0: TF Hierarchy kontrolü
+        if htf_bias:
+            alignment = is_higher_tf_aligned(timeframe, bias, htf_bias)
+            if not alignment['aligned']:
+                logger.info(f"⚠️ {pair} [{timeframe}]: TF HIERARCHY MISMATCH - {alignment['message']} → SKIP")
+                return []
+        
         # OB Kontrol
         if len(obs) > 0:
             ob = obs[0]
@@ -296,6 +352,9 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
                     if pattern_result:
                         s['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         s['pattern_data'] = pattern_result
+                    # v2.7.0: HTF alignment bilgisi
+                    if htf_bias:
+                        s['htf_aligned'] = True
                     logger.info(f"✅ {pair} [{timeframe}]: OB LONG found!")
                     setups.append(s)
             elif bias_str == 'bearish' and ob['type'] == 'bearish':
@@ -305,6 +364,9 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
                     if pattern_result:
                         s['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         s['pattern_data'] = pattern_result
+                    # v2.7.0: HTF alignment bilgisi
+                    if htf_bias:
+                        s['htf_aligned'] = True
                     logger.info(f"✅ {pair} [{timeframe}]: OB SHORT found!")
                     setups.append(s)
         
@@ -318,6 +380,9 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
                     if pattern_result:
                         s['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         s['pattern_data'] = pattern_result
+                    # v2.7.0: HTF alignment bilgisi
+                    if htf_bias:
+                        s['htf_aligned'] = True
                     logger.info(f"✅ {pair} [{timeframe}]: FVG LONG found!")
                     setups.append(s)
             elif bias_str == 'bearish' and fvg['type'] == 'bearish':
@@ -327,6 +392,9 @@ def check_timeframe(pair, market_data, timeframe, bias, current_price, fibo_data
                     if pattern_result:
                         s['pattern_info'] = _format_pattern_for_grok(pattern_result)
                         s['pattern_data'] = pattern_result
+                    # v2.7.0: HTF alignment bilgisi
+                    if htf_bias:
+                        s['htf_aligned'] = True
                     logger.info(f"✅ {pair} [{timeframe}]: FVG SHORT found!")
                     setups.append(s)
         
@@ -344,6 +412,7 @@ def scan_setups(pair, market_data):
     """
     Tüm timeframe'leri tarayarak setup bul.
     
+    v2.7.0: TF Hierarchy + PDC Breakout entegrasyonu
     v2.6.0: Pattern detection entegrasyonu
     """
     try:
@@ -355,14 +424,31 @@ def scan_setups(pair, market_data):
         daily_ohlcv = market_data.get('daily_ohlcv', [])
         if daily_ohlcv and len(daily_ohlcv) >= 5:
             pdc_result = calculate_pdc_bias(daily_ohlcv)
-            bias = pdc_result['bias']
+            pdc_bias = pdc_result['bias']
             pdc = pdc_result['pdc']
             doji_warning = pdc_result['doji_warning']
             reversal_mode = pdc_result['reversal_mode']
             pattern_result = pdc_result.get('pattern')  # v2.6.0: Yeni
             
+            # v2.7.0: PDC Breakout kontrolü - Intraday bias belirleme
+            current_price = market_data.get('current_price', 0)
+            intraday_result = get_intraday_bias(current_price, pdc, pdc_bias)
+            bias = intraday_result['bias']
+            bias_source = intraday_result['source']
+            
+            # v2.7.0: Breakout bildirimi için kontrol
+            breakout_result = check_pdc_breakout(current_price, pdc, pdc_bias)
+            if breakout_result['breakout_detected']:
+                logger.info(f"🚨 {pair}: {breakout_result['message']}")
+            
             # Fibo zone hesapla
             fibo_data = calculate_fibo_zones(pdc, bias)
+            
+            # v2.7.0: HTF Bias dictionary oluştur
+            htf_bias = {
+                '1D': bias,  # PDC bias
+                '1h': bias,  # Şimdilik aynı (gelecekte 1h verisi eklenebilir)
+            }
             
             # v2.6.0: Pattern bilgisini logla
             if pattern_result and pattern_result.get('pattern_detected'):
@@ -376,25 +462,31 @@ def scan_setups(pair, market_data):
             # Fallback: Eski yöntem
             pdc = market_data.get('previous_day', {})
             bias = 'LONG' if pdc.get('candle_type') == 'green' else 'SHORT'
+            bias_source = 'PDC'
             fibo_data = None
             doji_warning = False
             reversal_mode = False
             pattern_result = None
+            htf_bias = None
+            breakout_result = None
         
         current_price = market_data.get('current_price', 0)
         
-        logger.info(f"🔎 {pair}: Scan başladı - Bias={bias}, Price=${current_price:.2f}, TFs={len(TIMEFRAMES)}, Doji={doji_warning}")
+        logger.info(f"🔎 {pair}: Scan başladı - Bias={bias} ({bias_source}), Price={format_price(current_price)}, TFs={len(TIMEFRAMES)}, Doji={doji_warning}")
         
         all_setups = []
         
         for tf in TIMEFRAMES:
-            # v2.6.0: pattern_result'u check_timeframe'e geç
-            s = check_timeframe(pair, market_data, tf, bias, current_price, fibo_data, pattern_result)
+            # v2.7.0: htf_bias'ı check_timeframe'e geç
+            s = check_timeframe(pair, market_data, tf, bias, current_price, fibo_data, pattern_result, htf_bias)
             if s:
-                # Doji bilgisini ekle
+                # Doji ve breakout bilgisini ekle
                 for setup in s:
                     setup['doji_warning'] = doji_warning
                     setup['reversal_mode'] = reversal_mode
+                    setup['bias_source'] = bias_source  # v2.7.0
+                    if breakout_result:
+                        setup['pdc_breakout'] = breakout_result
                 all_setups.extend(s)
         
         if all_setups:

@@ -63,16 +63,16 @@ TF_GROUP_LTF = ['15m', '5m', '3m']  # Lower Timeframes
 # ============================================
 # ATR MULTIPLIERS - STOP & TP (v2.4.10)
 # ============================================
-STOP_MULTIPLIER = 1.0      # Stop seviyesi: 1.0 ATR
-TP_MULTIPLIER = 3.0        # v2.4.10: Tek TP = 3.0 ATR (R:R 3.0)
+STOP_MULTIPLIER = 1.5      # Stop seviyesi: 1.0 ATR
+TP_MULTIPLIER = 4.5        # v2.4.10: Tek TP = 3.0 ATR (R:R 3.0)
 
 # ============================================
 # R:R THRESHOLDS (v2.4.10)
 # ============================================
 MIN_RR_RATIO = 3.0         # v2.4.10: Minimum R:R = 3.0 (eskiden 2.0)
-RR_EXCELLENT = 5.0         # Mükemmel
-RR_GOOD = 4.0              # İyi
-RR_MEDIUM = 3.5            # Orta
+RR_EXCELLENT = 6.0         # Mükemmel
+RR_GOOD = 5.0              # İyi
+RR_MEDIUM = 4.0            # Orta
 RR_MINIMUM = 3.0           # Minimum
 
 # ============================================
@@ -87,35 +87,35 @@ SCORE_RR_ELSE = 0.10
 # ============================================
 # VOLUME THRESHOLDS (Fine tuning buradan)
 # ============================================
-VOLUME_TRADEABLE_MIN = 0.65 # Minimum tradeable (bu altı = reject)
-VOLUME_LOW = 0.75           # Düşük ama kabul edilebilir
+VOLUME_TRADEABLE_MIN = 1.0 # Minimum tradeable (bu altı = reject)
+VOLUME_LOW = 1.0           # Düşük ama kabul edilebilir
 VOLUME_MEDIUM = 1.5        # Orta
 VOLUME_GOOD = 2.0          # İyi
-VOLUME_EXCELLENT = 2.5     # Mükemmel volume spike
+VOLUME_EXCELLENT = 3.0     # Mükemmel volume spike
 
 # Volume Spike Flag (boolean için) - bitget_service kullanıyor
-VOLUME_SPIKE_FLAG = 1.5    # spike_ratio >= bu değer → spike=True
+VOLUME_SPIKE_FLAG = 2.0    # spike_ratio >= bu değer → spike=True
 
 # Volume Strength Labels - bitget_service kullanıyor
-VOLUME_STRENGTH_HIGH = 2.0   # >= 2.0 → 'high'
-VOLUME_STRENGTH_MEDIUM = 1.5 # >= 1.5 → 'medium'
+VOLUME_STRENGTH_HIGH = 3.0   # >= 2.0 → 'high'
+VOLUME_STRENGTH_MEDIUM = 2.0 # >= 1.5 → 'medium'
 # else → 'low'
 
 # ============================================
 # VOLUME SCORES (Fine tuning buradan)
 # ============================================
-SCORE_VOLUME_EXCELLENT = 1.50  # Bonus
-SCORE_VOLUME_GOOD = 1.20
-SCORE_VOLUME_MEDIUM = 0.80
-SCORE_VOLUME_LOW = 0.50
-SCORE_VOLUME_ELSE = 0.4
+SCORE_VOLUME_EXCELLENT = 1.75  # Bonus
+SCORE_VOLUME_GOOD = 1.25
+SCORE_VOLUME_MEDIUM = 0.75
+SCORE_VOLUME_LOW = 0.45
+SCORE_VOLUME_ELSE = 0.30
 
 # ============================================
 # OB/FVG STRENGTH MAPPING (Fine tuning buradan)
 # ============================================
 STRENGTH_MAP = {
-    'high': 1.25,    # Bonus
-    'medium': 0.75,
+    'high': 1.35,    # Bonus
+    'medium': 0.65,
     'low': 0.30
 }
 
@@ -133,7 +133,7 @@ WEIGHT_RR = 0.10           # Risk:Reward ağırlığı
 # Toplam = 1.0
 
 # Volume Veto Threshold
-VOLUME_VETO_MAX_SCORE = 0.65  # Volume < VOLUME_LOW ise max bu score
+VOLUME_VETO_MAX_SCORE = 0.80  # Volume < VOLUME_LOW ise max bu score
 
 # ============================================
 # v2.4.0: OB/FVG MİNİMUM BOYUT (ATR bazlı)
@@ -151,18 +151,18 @@ MAX_ENTRY_DISTANCE_PERCENT = 2.0   # Entry max %2 uzaklıkta olmalı
 # ============================================
 # v2.5.1: MAX ZONE COUNTS
 # ============================================
-MAX_OB_COUNT = 3                   # En fazla 3 OB döndür
-MAX_FVG_COUNT = 3                  # En fazla 3 FVG döndür
+MAX_OB_COUNT = 4                   # En fazla 3 OB döndür
+MAX_FVG_COUNT = 4                  # En fazla 3 FVG döndür
 
 # ============================================
 # v2.5.1: FİBO ZONE TANIMLARI (UPDATED!)
 # ============================================
 # OB Zone: PDC içi retracement (%70-90)
-OB_ZONE_MIN = 0.60         # OB arama: %50-150
+OB_ZONE_MIN = 0.70         # OB arama: %50-150
 OB_ZONE_MAX = 1.50  
 
 # FVG Zone: PDC içi + dışı (%50-150)
-FVG_ZONE_MIN = 0.60        # v2.5.1: %50 (PDC orta noktası)
+FVG_ZONE_MIN = 0.70        # v2.5.1: %50 (PDC orta noktası)
 FVG_ZONE_MAX = 1.50        # v2.5.1: %150 (PDC dışı extension)
 
 # ============================================
@@ -170,39 +170,39 @@ FVG_ZONE_MAX = 1.50        # v2.5.1: %150 (PDC dışı extension)
 # ============================================
 
 # === DOJI THRESHOLDS ===
-DOJI_BODY_THRESHOLD = 0.10        # Body < %10 = Doji
-DOJI_SHADOW_RATIO = 2.0           # Gölge/body oranı (Gravestone/Dragonfly için)
+DOJI_BODY_THRESHOLD = 0.08        # Body < %10 = Doji
+DOJI_SHADOW_RATIO = 2.5           # Gölge/body oranı (Gravestone/Dragonfly için)
 DOJI_LONGLEG_MULTIPLIER = 3.0     # Long-legged doji: gölge > body×3
 
 # === HAMMER/STAR THRESHOLDS ===
 HAMMER_SHADOW_RATIO = 2.0         # Alt gölge ≥ 2x body
-HAMMER_OPPOSITE_MAX = 0.3         # Karşı gölge < %30 body
+HAMMER_OPPOSITE_MAX = 0.2         # Karşı gölge < %30 body
 
 # === ENGULFING THRESHOLDS ===
-ENGULF_MIN_RATIO = 1.0            # 2. body ≥ 1. body
-ENGULF_PARTIAL_RATIO = 0.7        # Partial engulf için min %70
+ENGULF_MIN_RATIO = 1.1            # 2. body ≥ 1. body
+ENGULF_PARTIAL_RATIO = 0.8        # Partial engulf için min %70
 
 # === PIERCING/DARK CLOUD THRESHOLDS ===
-PIERCING_MIN_RATIO = 0.5          # En az %50 penetrasyon
+PIERCING_MIN_RATIO = 0.7          # En az %50 penetrasyon
 
 # === MOMENTUM THRESHOLDS ===
-MOMENTUM_SHRINK_RATIO = 0.7       # Body < öncekinin %70'i = shrinking
-MOMENTUM_GROW_RATIO = 1.3         # Body > öncekinin %130'u = growing
+MOMENTUM_SHRINK_RATIO = 0.8       # Body < öncekinin %70'i = shrinking
+MOMENTUM_GROW_RATIO = 1.5        # Body > öncekinin %130'u = growing
 MOMENTUM_MIN_COUNT = 2            # En az 2 ardışık değişim
 
 # === TREND CONTEXT ===
-TREND_MIN_CANDLES = 3             # Min 3 aynı yönlü mum = trend
+TREND_MIN_CANDLES = 4             # Min 3 aynı yönlü mum = trend
 TREND_LOOKBACK = 5                # Son 5 muma bak
 
 # === LIQUIDITY SWEEP THRESHOLDS ===
-SWEEP_WICK_RATIO = 0.6            # Wick > range'in %60'ı
+SWEEP_WICK_RATIO = 0.5            # Wick > range'in %60'ı
 SWEEP_LOOKBACK = 5                # Swing high/low için geriye bak
 
 # === CONFIDENCE WEIGHTS ===
 CONFIDENCE_3_CANDLE = 0.95        # 3 mum pattern (Star)
-CONFIDENCE_2_CANDLE = 0.85        # 2 mum pattern (Engulfing)
-CONFIDENCE_1_CANDLE = 0.70        # 1 mum pattern (Doji/Hammer)
-CONFIDENCE_MOMENTUM = 0.60        # Momentum analizi
+CONFIDENCE_2_CANDLE = 0.75        # 2 mum pattern (Engulfing)
+CONFIDENCE_1_CANDLE = 0.65        # 1 mum pattern (Doji/Hammer)
+CONFIDENCE_MOMENTUM = 0.75        # Momentum analizi
 
 # === CONTEXT MULTIPLIERS ===
 CONTEXT_REVERSAL_BONUS = 1.2      # Doğru konumda bonus

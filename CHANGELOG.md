@@ -1,3 +1,35 @@
+# T-TARS Changelog
+
+## v2.8.2 (2026-01-26)
+
+### 🎯 ÖNEMLİ DEĞİŞİKLİKLER
+
+#### Coin Listesi Sadeleştirildi
+- **AUTO_SCAN_PAIRS**: 14 → 4 coin
+- **Kalan coinler**: ETH, SOL, BNB, BCH
+- **Çıkarılan coinler**: XRP, TRX, DOGE, LTC, SUI, ADA, AVAX, PEPE, LINK, ZEC
+
+#### Pozisyon Limitleri Artırıldı
+- **MAX_MARGIN_PER_COIN_DIRECTION**: $200 → $1000
+- **MAX_POSITION_VALUE_PER_COIN_DIRECTION**: $4000 → $20000
+- Her coin+yön için 5x daha büyük pozisyon açılabilir
+
+### 📄 Değişen Dosyalar
+- `config.py` - AUTO_SCAN_PAIRS sadeleştirildi, MAX_POSITION_SIZE eklendi
+- `T-TARS_v17_1h_Scanner.pine` - 4 coin'e güncellendi
+- `T-TARS_v17_15m_Scanner.pine` - 4 coin'e güncellendi
+
+---
+
+## v2.8.1 (2026-01-24)
+
+### Değişiklikler
+- Version synchronization
+- STOP_MULTIPLIER: 1.5
+- TP_MULTIPLIER: 4.5
+- Fine-tuning parametreleri güncellendi
+
+---
 ## v2.8.0 (2026-01-12)
 
 ### 🆕 YENİ ÖZELLİKLER

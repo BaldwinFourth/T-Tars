@@ -1,22 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-T-TARS Configuration v2.7.1
+T-TARS Configuration v2.8.2
 ============================
 
-v2.7.1:
+v2.8.2:
+- CHANGED: AUTO_SCAN_PAIRS 14 → 4 coin (ETH, SOL, BNB, BCH)
+- CHANGED: MAX_MARGIN_PER_COIN_DIRECTION = 1000 ($200 → $1000)
+- CHANGED: MAX_POSITION_VALUE_PER_COIN_DIRECTION = 20000 ($4000 → $20000)
+- REMOVED: XRP, TRX, DOGE, LTC, SUI, ADA, AVAX, PEPE, LINK, ZEC
+
+v2.8.1:
 - NEW: MAX_MARGIN_PER_COIN_DIRECTION - Coin+yön bazlı max marjin ($200)
 - NEW: MAX_POSITION_VALUE_PER_COIN_DIRECTION - Coin+yön bazlı max pozisyon ($4000)
-- Position stacking kontrolü için limitler (per coin + per direction)
-
-v2.5.9:
-- REMOVED: JUP, NIGHT, HYPE çıkarıldı
-- ADDED: PEPE, LINK, ZEC eklendi
-- Toplam: 14 coin (değişmedi)
 
 v2.5.3:
 - NEW: XAI_API_KEY - Grok API anahtarı
 - NEW: GROK_MODEL - grok-4-1-fast-reasoning
-- CHANGED: Claude → Grok AI geçişi
 """
 
 import os
@@ -24,11 +23,11 @@ from pathlib import Path
 
 
 class Config:
-    """T-TARS Configuration v2.7.1"""
-    
+    """T-TARS Configuration v2.8.2"""
+
     # Get base directory
     BASE_DIR = Path(__file__).resolve().parent.parent
-    
+
     # Auto-load version from VERSION file
     VERSION_FILE = BASE_DIR / "VERSION"
     try:
@@ -36,85 +35,74 @@ class Config:
             VERSION = f.read().strip()
     except FileNotFoundError:
         raise Exception("❌ VERSION dosyası bulunamadı!")
-    
+
     # ============================================
     # TELEGRAM
     # ============================================
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-    
+
     @staticmethod
     def get_allowed_chats():
         """Get allowed chat IDs - sadece ana chat"""
         return [Config.TELEGRAM_CHAT_ID]
-    
+
     # ============================================
     # BITGET API
     # ============================================
     BITGET_API_KEY = os.getenv('BITGET_API_KEY', '')
     BITGET_SECRET_KEY = os.getenv('BITGET_SECRET_KEY', '')
     BITGET_PASSPHRASE = os.getenv('BITGET_PASSPHRASE', '')
-    
+
     BITGET_TRADING_ENABLED = os.getenv('BITGET_TRADING_ENABLED', 'true').lower() == 'true'
     DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '20'))
-    
+
     # ============================================
     # GROK AI (v2.5.3 - Claude yerine)
     # ============================================
     XAI_API_KEY = os.getenv('XAI_API_KEY')
     GROK_MODEL = os.getenv('GROK_MODEL', 'grok-4-1-fast-reasoning')
     THINKING_BUDGET = int(os.getenv('THINKING_BUDGET', '10000'))  # Grok reasoning için
-    
+
     # Backward compatibility (deprecated - artık kullanılmıyor)
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')  # Deprecated
     CLAUDE_MODEL = os.getenv('CLAUDE_MODEL', 'claude-haiku-4-5-20251001')  # Deprecated
-    
+
     # ============================================
     # CLOUD STORAGE
     # ============================================
     BUCKET_NAME = os.getenv('BUCKET_NAME', 'tars-trading-templates')
     BUCKET_NAME_DATA = os.getenv('BUCKET_NAME_DATA', 'tars-trading-data')
-    
+
     PLAN_TEMPLATE = 'T-Tars Plan.md'
     EXECUTE_TEMPLATE = 'T-Tars Execute Log.md'
     LOG_TEMPLATE = 'T-Tars Trade Log.md'
-    
+
     # ============================================
     # TIMEFRAMES
     # ============================================
     TIMEFRAMES = ['1h', '15m']
-    
+
     # ============================================
-    # TRADING PAIRS (v2.5.9 - 14 coin)
+    # TRADING PAIRS (v2.8.2 - 4 coin)
     # ============================================
-    
     AUTO_SCAN_PAIRS = [
         'ETH/USDT:USDT',   # Ethereum
         'SOL/USDT:USDT',   # Solana
         'BNB/USDT:USDT',   # BNB
-        'XRP/USDT:USDT',   # Ripple
-        'TRX/USDT:USDT',   # Tron
         'BCH/USDT:USDT',   # Bitcoin Cash
-        'DOGE/USDT:USDT',  # Dogecoin
-        'LTC/USDT:USDT',   # Litecoin
-        'SUI/USDT:USDT',   # Sui
-        'ADA/USDT:USDT',   # Cardano
-        'AVAX/USDT:USDT',  # Avalanche
-        'PEPE/USDT:USDT',  # Pepe (yeni v2.5.9)
-        'LINK/USDT:USDT',  # Chainlink (yeni v2.5.9)
-        'ZEC/USDT:USDT',   # Zcash (yeni v2.5.9)
     ]
-    
+
     MANUAL_PAIRS = [
         'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
-        'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT', 
-        'TRUMP/USDT:USDT', 'AVAX/USDT:USDT', 
-        'SHIB/USDT:USDT', 'BNB/USDT:USDT',
-        'TRX/USDT:USDT', 'SUI/USDT:USDT', 'PEPE/USDT:USDT', 
-        'PUMP/USDT:USDT', 'BCH/USDT:USDT', 'ADA/USDT:USDT',
-        'FLOKI/USDT:USDT', 'LINK/USDT:USDT', 'ZEC/USDT:USDT',
+        'BNB/USDT:USDT', 'BCH/USDT:USDT',
+        'LTC/USDT:USDT', 'XRP/USDT:USDT', 'DOGE/USDT:USDT',
+        'TRUMP/USDT:USDT', 'AVAX/USDT:USDT',
+        'SHIB/USDT:USDT', 'TRX/USDT:USDT', 'SUI/USDT:USDT',
+        'PEPE/USDT:USDT', 'ADA/USDT:USDT', 'LINK/USDT:USDT',
+        'ZEC/USDT:USDT',
     ]
-    
+
     # ============================================
     # RISK MANAGEMENT
     # ============================================
@@ -127,20 +115,20 @@ class Config:
     CLOSE_SLIPPAGE_PCT = float(os.getenv('CLOSE_SLIPPAGE_PCT', '0.002'))
     MAX_DAILY_LOSS = float(os.getenv('MAX_DAILY_LOSS', '500'))
     MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', '200'))
-    
-    # v2.7.1: Position Stacking Limitleri (per coin + per direction)
+
+    # v2.8.2: Position Stacking Limitleri (per coin + per direction)
     # NOT: Her coin+direction kombinasyonu BAĞIMSIZ hesaplanır!
-    # Örnek: AVAX LONG = max $4000, AVAX SHORT = ayrı max $4000, BNB etkilenmez
-    MAX_MARGIN_PER_COIN_DIRECTION = float(os.getenv('MAX_MARGIN_PER_COIN_DIRECTION', '200'))  # $200 marjin
-    MAX_POSITION_VALUE_PER_COIN_DIRECTION = float(os.getenv('MAX_POSITION_VALUE_PER_COIN_DIRECTION', '4000'))  # $4000 pozisyon (20x)
-    
+    # Örnek: ETH LONG = max $20000, ETH SHORT = ayrı max $20000
+    MAX_MARGIN_PER_COIN_DIRECTION = float(os.getenv('MAX_MARGIN_PER_COIN_DIRECTION', '1000'))  # $1000 marjin (v2.8.2: 200→1000)
+    MAX_POSITION_VALUE_PER_COIN_DIRECTION = float(os.getenv('MAX_POSITION_VALUE_PER_COIN_DIRECTION', '20000'))  # $20000 pozisyon (20x)
+
     # ============================================
     # CACHE & MONITORING
     # ============================================
     MARKET_CACHE_TTL = int(os.getenv('MARKET_CACHE_TTL', '1200'))
     MONITOR_INTERVAL_MINUTES = int(os.getenv('MONITOR_INTERVAL_MINUTES', '5'))
     PORT = int(os.getenv('PORT', '8080'))
-    
+
     # ============================================
     # VALIDATION
     # ============================================
@@ -152,7 +140,7 @@ class Config:
         if missing:
             raise ValueError(f"Missing required config: {', '.join(missing)}")
         return True
-    
+
     @staticmethod
     def validate_bitget():
         required = ['BITGET_API_KEY', 'BITGET_SECRET_KEY', 'BITGET_PASSPHRASE']
@@ -160,12 +148,12 @@ class Config:
         if missing:
             return False, f"Missing Bitget config: {', '.join(missing)}"
         return True, "Bitget config OK"
-    
+
     @staticmethod
     def get_pair_symbol(ticker):
         ticker = ticker.upper().replace('USDT', '')
         return f'{ticker}/USDT:USDT'
-    
+
     @staticmethod
     def get_clean_pair(bitget_pair):
         return bitget_pair.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')

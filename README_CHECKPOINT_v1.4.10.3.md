@@ -50,10 +50,10 @@ Bot şu an **simülasyon modunda** çalışıyor:
 
 ### Environment Variables
 ```
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=844960218
-TELEGRAM_BETA_GROUP_ID=-1003414684807
-ANTHROPIC_API_KEY=sk-ant-...
+TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+TELEGRAM_CHAT_ID=<telegram-chat-id>
+TELEGRAM_BETA_GROUP_ID=<telegram-beta-group-id>
+ANTHROPIC_API_KEY=<anthropic-api-key>
 CLAUDE_MODEL=claude-haiku-4-5-20251001
 BUCKET_NAME=tars-trading-templates
 BUCKET_NAME_DATA=tars-trading-data
